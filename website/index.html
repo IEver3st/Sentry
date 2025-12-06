@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sentry Backup</title>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect width='22' height='22' x='1' y='1' rx='5' ry='5' fill='%234f9bff'/%3E%3Cpath d='M12 4.5l6.5 3v4.2c0 1.7-.5 3.3-1.5 4.6-.8 1-1.9 1.8-3.1 2.3L12 20l-1.9-1.4c-1.2-.5-2.3-1.3-3.1-2.3-1-1.3-1.5-2.9-1.5-4.6v-4.2L12 4.5z' fill='none'/%3E%3Cpath d='M9.2 11.2L12 13l2.9-1.8'/%3E%3Cpath d='M12 9.5v3.6'/%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui'] },
+            colors: {
+              ink: {
+                900: '#0b1224',
+                800: '#0f1a33',
+                700: '#142347',
+              },
+              accent: {
+                500: '#4f9bff',
+                400: '#7ab7ff',
+              },
+            },
+            boxShadow: {
+              deep: '0 20px 70px rgba(0,0,0,0.35)',
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        background-color: #0b1224;
+      }
+      @keyframes float-slow {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(-10px);
+        }
+      }
+      @keyframes float-slower {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(8px);
+        }
+      }
+      @keyframes fade-up {
+        0% {
+          opacity: 0;
+          transform: translateY(12px);
+        }
+        100% {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      .animate-float-slow {
+        animation: float-slow 12s ease-in-out infinite;
+      }
+      .animate-float-slower {
+        animation: float-slower 14s ease-in-out infinite;
+      }
+      .animate-fade-up {
+        animation: fade-up 0.8s ease-out forwards;
+        opacity: 0;
+      }
+      .animate-delay-1 {
+        animation-delay: 0.1s;
+      }
+      .animate-delay-2 {
+        animation-delay: 0.2s;
+      }
+      .animate-delay-3 {
+        animation-delay: 0.3s;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .animate-float-slow,
+        .animate-float-slower,
+        .animate-fade-up {
+          animation: none;
+          opacity: 1;
+          transform: none;
+        }
+      }
+    </style>
+    <script src="https://unpkg.com/lucide@latest"></script>
+  </head>
+  <body class="relative min-h-screen bg-ink-900 text-slate-100 antialiased overflow-x-hidden">
+    <div class="pointer-events-none absolute inset-0">
+      <div class="absolute inset-0 opacity-20 bg-ink-800"></div>
+      <div
+        class="absolute -left-14 top-16 h-64 w-64 rounded-full bg-accent-500/15 blur-[90px] animate-float-slow"
+      ></div>
+      <div
+        class="absolute -right-24 top-32 h-72 w-72 rounded-full bg-white/10 blur-[110px] animate-float-slower"
+      ></div>
+      <div
+        class="absolute left-10 bottom-10 h-52 w-52 rounded-full bg-accent-400/10 blur-[80px]"
+      ></div>
+    </div>
+
+    <header
+      class="sticky top-0 z-20 border-b border-white/5 bg-gradient-to-b from-ink-900/95 via-ink-900/92 to-ink-900/88 backdrop-blur"
+    >
+      <div class="mx-auto flex max-w-[1360px] items-center justify-between px-8 py-4">
+        <div class="flex items-center gap-3">
+          <div
+            class="flex h-10 w-10 items-center justify-center rounded-2xl bg-accent-500 text-ink-900 shadow-lg shadow-black/30"
+          >
+            <i data-lucide="shield" class="h-5 w-5"></i>
+          </div>
+          <div>
+            <p class="text-lg font-semibold">Sentry Backup</p>
+            <p class="text-sm text-slate-400">Backups without interruptions</p>
+          </div>
+        </div>
+        <nav class="hidden items-center gap-7 text-sm font-medium text-slate-200 md:flex">
+          <a href="#features" class="transition hover:text-white">Features</a>
+          <a href="#how-it-works" class="transition hover:text-white">How it works</a>
+          <a href="#faq" class="transition hover:text-white">FAQ</a>
+          <a
+            href="https://github.com/IEver3st/Sentry-Releases/releases/tag/v1.0.1"
+            class="rounded-full border border-white/10 px-4 py-2 transition hover:border-white/30 hover:text-white"
+          >
+            GitHub
+          </a>
+          <a
+            href="https://github.com/IEver3st/Sentry-Releases/releases/tag/v1.0.1"
+            data-download
+            class="rounded-full bg-white px-4 py-2 font-semibold text-ink-900 shadow-md transition hover:-translate-y-0.5 hover:shadow-lg"
+          >
+            Download
+          </a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="relative mx-auto max-w-[1360px] px-8 pb-20 pt-12">
+      <section class="grid items-center gap-12 lg:grid-cols-[1.05fr_1.05fr]">
+        <div class="space-y-7">
+          <div
+            class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.2em] text-slate-200 animate-fade-up"
+          >
+            <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+            Calm, private, automatic
+          </div>
+          <div class="space-y-4">
+            <h1 class="text-4xl font-bold leading-tight text-white sm:text-5xl animate-fade-up animate-delay-1">
+              Backups that feel invisible, until the moment you need them.
+            </h1>
+            <p class="text-lg text-slate-300 animate-fade-up animate-delay-2">
+              Inspired by quiet, distraction-free browsing—Sentry keeps your files safe without
+              shouting for attention. No nags, no clutter, just trustworthy restores.
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center gap-3">
+            <a
+              href="https://github.com/IEver3st/Sentry-Releases/releases/tag/v1.0.1"
+              data-download
+              class="inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 font-semibold text-ink-900 shadow-lg shadow-white/20 transition hover:-translate-y-0.5 hover:shadow-xl"
+            >
+              <i data-lucide="download-cloud" class="h-5 w-5"></i>
+              Download for Windows
+            </a>
+            <a
+              href="https://github.com/IEver3st/Sentry-Releases/releases/tag/v1.0.1"
+              class="inline-flex items-center gap-2 rounded-full border border-white/15 px-5 py-3 text-slate-200 transition hover:border-white/30 hover:text-white"
+            >
+              <i data-lucide="github" class="h-5 w-5"></i>
+              View on GitHub
+            </a>
+          </div>
+          <div class="flex flex-wrap gap-3 text-sm text-slate-300">
+            <div class="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2">
+              <i data-lucide="shield-check" class="h-4 w-4 text-emerald-400"></i>
+              Encrypted end-to-end
+            </div>
+            <div class="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2">
+              <i data-lucide="clock-3" class="h-4 w-4 text-accent-400"></i>
+              Schedules that adapt
+            </div>
+            <div class="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2">
+              <i data-lucide="bell-off" class="h-4 w-4 text-amber-300"></i>
+              No noise, just signals
+            </div>
+          </div>
+        </div>
+
+        <div class="relative">
+          <div class="absolute -inset-6 rounded-3xl bg-white/5 blur-2xl"></div>
+          <div class="relative overflow-hidden rounded-3xl border border-white/10 bg-ink-800/85 shadow-deep backdrop-blur">
+            <div class="flex items-center justify-between border-b border-white/5 px-5 py-4">
+              <div class="flex items-center gap-2">
+                <span class="h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
+                <span class="h-2.5 w-2.5 rounded-full bg-amber-300"></span>
+                <span class="h-2.5 w-2.5 rounded-full bg-red-400"></span>
+              </div>
+              <span class="text-sm text-slate-300">Sentry snapshot</span>
+            </div>
+            <div class="space-y-4 p-5">
+              <div class="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2 text-sm font-semibold text-white">
+                    <i data-lucide="zap" class="h-4 w-4 text-accent-400"></i>
+                    Quick actions
+                  </div>
+                  <span class="text-xs text-slate-400">3 backup sets configured</span>
+                </div>
+                <div class="rounded-xl border border-white/5 bg-ink-800/70 px-4 py-3 text-sm text-slate-300">
+                  No active backup. Start one from Backup Sets or Quick Actions.
+                </div>
+              </div>
+
+              <div class="grid gap-4 md:grid-cols-4">
+                <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p class="text-sm text-slate-400">Backup sets</p>
+                  <div class="mt-1 flex items-center gap-2 text-2xl font-semibold text-white">
+                    <i data-lucide="folder" class="h-5 w-5 text-accent-400"></i>
+                    <span>3</span>
+                  </div>
+                  <p class="text-xs text-slate-400">Configured</p>
+                </div>
+                <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p class="text-sm text-slate-400">Total backups</p>
+                  <div class="mt-1 flex items-center gap-2 text-2xl font-semibold text-white">
+                    <i data-lucide="check-circle-2" class="h-5 w-5 text-emerald-400"></i>
+                    <span>87</span>
+                  </div>
+                  <p class="text-xs text-slate-400">All-time</p>
+                </div>
+                <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p class="text-sm text-slate-400">Data backed up</p>
+                  <div class="mt-1 flex items-center gap-2 text-2xl font-semibold text-white">
+                    <i data-lucide="hard-drive" class="h-5 w-5 text-purple-300"></i>
+                    <span>288.96 MB</span>
+                  </div>
+                  <p class="text-xs text-slate-400">Latest total</p>
+                </div>
+                <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p class="text-sm text-slate-400">Active schedules</p>
+                  <div class="mt-1 flex items-center gap-2 text-2xl font-semibold text-white">
+                    <i data-lucide="clock-3" class="h-5 w-5 text-amber-300"></i>
+                    <span>1</span>
+                  </div>
+                  <p class="text-xs text-slate-400">Running</p>
+                </div>
+              </div>
+
+              <div class="grid gap-4 md:grid-cols-[1.05fr_0.95fr]">
+                <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div class="flex items-center gap-2 text-sm font-semibold text-white">
+                    <i data-lucide="clock-3" class="h-4 w-4 text-accent-400"></i>
+                    Recent backup sets
+                  </div>
+                  <p class="text-xs text-slate-400">Your most recently updated backup sets</p>
+                  <div class="mt-3 space-y-3">
+                    <div class="flex items-center justify-between rounded-xl bg-ink-800/70 px-4 py-3">
+                      <div class="flex flex-col">
+                        <span class="text-sm font-semibold text-white">Workspace</span>
+                        <span class="text-xs text-slate-400">Last backup: 32m ago</span>
+                      </div>
+                      <div class="text-right text-xs text-slate-300">
+                        <div class="font-semibold text-white">128.4 MB</div>
+                        <div>54 backups</div>
+                      </div>
+                    </div>
+                    <div class="flex items-center justify-between rounded-xl bg-ink-800/70 px-4 py-3">
+                      <div class="flex flex-col">
+                        <span class="text-sm font-semibold text-white">Media Vault</span>
+                        <span class="text-xs text-slate-400">Last backup: 48m ago</span>
+                      </div>
+                      <div class="text-right text-xs text-slate-300">
+                        <div class="font-semibold text-white">812.5 MB</div>
+                        <div>22 backups</div>
+                      </div>
+                    </div>
+                    <div class="flex items-center justify-between rounded-xl bg-ink-800/70 px-4 py-3">
+                      <div class="flex flex-col">
+                        <span class="text-sm font-semibold text-white">Client Projects</span>
+                        <span class="text-xs text-slate-400">Last backup: 1h 12m ago</span>
+                      </div>
+                      <div class="text-right text-xs text-slate-300">
+                        <div class="font-semibold text-white">44.9 MB</div>
+                        <div>11 backups</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2 text-sm font-semibold text-white">
+                      <i data-lucide="cloud-lightning" class="h-4 w-4 text-accent-400"></i>
+                      Weather alerts
+                    </div>
+                    <span class="text-xs text-slate-400">Monitoring Miami, Florida</span>
+                  </div>
+                  <div class="mt-5 flex flex-col items-center gap-2 rounded-xl border border-white/5 bg-ink-800/70 px-4 py-6 text-center">
+                    <span
+                      class="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-300"
+                    >
+                      <i data-lucide="check" class="h-5 w-5"></i>
+                    </span>
+                    <p class="font-semibold text-white">All Clear</p>
+                    <p class="text-xs text-slate-400">No active weather alerts in your area</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <section id="features" class="mt-24 space-y-8">
+        <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p class="text-sm uppercase tracking-[0.2em] text-accent-400">Why Sentry</p>
+            <h2 class="text-3xl font-bold text-white">Friendly, fast, and focused</h2>
+            <p class="mt-2 max-w-2xl text-slate-300">
+              Built for people who want calm reliability. Clean edges, gentle motion, and sharp
+              defaults keep the experience feeling light.
+            </p>
+          </div>
+          <div class="flex items-center gap-2 text-sm text-slate-300">
+            <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            Always up to date
+          </div>
+        </div>
+
+        <div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+          <article
+            class="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/20 transition hover:-translate-y-1 hover:border-white/20"
+          >
+            <div
+              class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-500/15 text-accent-400"
+            >
+              <i data-lucide="sparkle" class="h-5 w-5"></i>
+            </div>
+            <h3 class="text-lg font-semibold text-white">Minimal chrome</h3>
+            <p class="mt-2 text-sm text-slate-300">
+              A clean shell with rounded corners keeps focus on what matters: knowing your data is
+              safe.
+            </p>
+          </article>
+
+          <article
+            class="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/20 transition hover:-translate-y-1 hover:border-white/20"
+          >
+            <div
+              class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-500/15 text-accent-400"
+            >
+              <i data-lucide="wifi-off" class="h-5 w-5"></i>
+            </div>
+            <h3 class="text-lg font-semibold text-white">Works offline</h3>
+            <p class="mt-2 text-sm text-slate-300">
+              Resumable uploads and local checkpoints mean flaky connections are never blockers.
+            </p>
+          </article>
+
+          <article
+            class="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/20 transition hover:-translate-y-1 hover:border-white/20"
+          >
+            <div
+              class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-500/15 text-accent-400"
+            >
+              <i data-lucide="cpu" class="h-5 w-5"></i>
+            </div>
+            <h3 class="text-lg font-semibold text-white">Smart with resources</h3>
+            <p class="mt-2 text-sm text-slate-300">
+              Adaptive throttling, efficient hashing, and compression keep your machine responsive.
+            </p>
+          </article>
+
+          <article
+            class="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/20 transition hover:-translate-y-1 hover:border-white/20"
+          >
+            <div
+              class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-500/15 text-accent-400"
+            >
+              <i data-lucide="lock" class="h-5 w-5"></i>
+            </div>
+            <h3 class="text-lg font-semibold text-white">Yours, encrypted</h3>
+            <p class="mt-2 text-sm text-slate-300">
+              Client-side keys and signed updates keep backups private and tamper-resistant.
+            </p>
+          </article>
+
+          <article
+            class="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/20 transition hover:-translate-y-1 hover:border-white/20"
+          >
+            <div
+              class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-500/15 text-accent-400"
+            >
+              <i data-lucide="cloud" class="h-5 w-5"></i>
+            </div>
+            <h3 class="text-lg font-semibold text-white">Cloud-native</h3>
+            <p class="mt-2 text-sm text-slate-300">
+              Google Drive today with a path to more providers, without extra installers.
+            </p>
+          </article>
+
+          <article
+            class="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/20 transition hover:-translate-y-1 hover:border-white/20"
+          >
+            <div
+              class="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-accent-500/15 text-accent-400"
+            >
+              <i data-lucide="bell" class="h-5 w-5"></i>
+            </div>
+            <h3 class="text-lg font-semibold text-white">Signal-only alerts</h3>
+            <p class="mt-2 text-sm text-slate-300">
+              Sends the important bits—success, failures, restore tests—never nagging popups.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section
+        id="how-it-works"
+        class="mt-16 rounded-3xl border border-white/10 bg-ink-800/75 p-8 shadow-deep"
+      >
+        <div class="grid gap-8 lg:grid-cols-[1fr_1.1fr] lg:items-center">
+          <div class="space-y-3">
+            <p class="text-sm uppercase tracking-[0.2em] text-accent-400">How it works</p>
+            <h3 class="text-2xl font-bold text-white">From install to confident in minutes</h3>
+            <p class="text-slate-300">
+              Guided setup, a calm dashboard, and signed updates keep Sentry dependable while
+              staying out of the way.
+            </p>
+          </div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p class="text-sm text-slate-400">01 · Connect</p>
+              <p class="mt-1 text-white font-semibold">Link your cloud</p>
+              <p class="mt-2 text-sm text-slate-300">OAuth for Google Drive, nothing shared beyond.</p>
+            </div>
+            <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p class="text-sm text-slate-400">02 · Choose</p>
+              <p class="mt-1 text-white font-semibold">Pick what matters</p>
+              <p class="mt-2 text-sm text-slate-300">Presets plus granular folders and exclusions.</p>
+            </div>
+            <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p class="text-sm text-slate-400">03 · Schedule</p>
+              <p class="mt-1 text-white font-semibold">Set it and forget it</p>
+              <p class="mt-2 text-sm text-slate-300">Daily, weekly, or weather-aware runs with limits.</p>
+            </div>
+            <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p class="text-sm text-slate-400">04 · Verify</p>
+              <p class="mt-1 text-white font-semibold">Restore confidence</p>
+              <p class="mt-2 text-sm text-slate-300">Integrity tests and checksums before anything is marked healthy.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="mt-14 grid gap-6 lg:grid-cols-2">
+        <div class="rounded-3xl border border-white/10 bg-ink-800/75 p-6 shadow-lg shadow-black/30">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-accent-400">Live snapshot</p>
+              <h3 class="text-xl font-semibold text-white">Status at a glance</h3>
+            </div>
+            <span
+              class="rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-300"
+            >
+              Healthy
+            </span>
+          </div>
+          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+            <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p class="text-sm text-slate-400">Storage used</p>
+              <p class="text-2xl font-semibold text-white">128 GB</p>
+              <p class="text-xs text-slate-400">Across 3 sets · Cloud + local</p>
+            </div>
+            <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p class="text-sm text-slate-400">Last backup</p>
+              <p class="text-2xl font-semibold text-white">1h 12m ago</p>
+              <p class="text-xs text-slate-400">Auto-verified checksum</p>
+            </div>
+          </div>
+          <div class="mt-4 space-y-3">
+            <div class="flex items-center gap-3 rounded-2xl border border-white/10 bg-ink-700/70 p-3">
+              <i data-lucide="bell-ring" class="h-4 w-4 text-accent-400"></i>
+              <div class="flex-1">
+                <p class="text-sm text-white">Signal-only notifications</p>
+                <p class="text-xs text-slate-400">Success, issues, and restore checks—nothing noisy.</p>
+              </div>
+              <span class="text-xs text-emerald-300">On</span>
+            </div>
+            <div class="flex items-center gap-3 rounded-2xl border border-white/10 bg-ink-700/70 p-3">
+              <i data-lucide="activity" class="h-4 w-4 text-accent-400"></i>
+              <div class="flex-1">
+                <p class="text-sm text-white">Weather-aware scheduling</p>
+                <p class="text-xs text-slate-400">Extra runs when storms are forecast.</p>
+              </div>
+              <span class="text-xs text-emerald-300">Enabled</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-3xl border border-white/10 bg-ink-800/75 p-6 shadow-lg shadow-black/30">
+          <p class="text-sm uppercase tracking-[0.2em] text-accent-400">Security</p>
+          <h3 class="mt-2 text-xl font-semibold text-white">Trustworthy by design</h3>
+          <ul class="mt-4 space-y-3 text-sm text-slate-200">
+            <li class="flex items-start gap-3">
+              <i data-lucide="key-round" class="mt-0.5 h-4 w-4 text-accent-400"></i>
+              Client-side encryption and signed updates keep artifacts tamper-resistant.
+            </li>
+            <li class="flex items-start gap-3">
+              <i data-lucide="file-check-2" class="mt-0.5 h-4 w-4 text-accent-400"></i>
+              Integrity checks on every backup before it is marked healthy.
+            </li>
+            <li class="flex items-start gap-3">
+              <i data-lucide="lock-keyhole" class="mt-0.5 h-4 w-4 text-accent-400"></i>
+              OAuth for cloud access; secrets stay local and never leave your machine.
+            </li>
+          </ul>
+          <div class="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
+            <div class="flex items-center gap-2 text-slate-100">
+              <i data-lucide="shield-check" class="h-4 w-4 text-emerald-400"></i>
+              Signed updates
+            </div>
+            <p class="mt-2 text-slate-300">
+              Auto-update uses signed artifacts from GitHub Releases so you always pull authentic
+              builds.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="faq" class="mt-14 rounded-3xl border border-white/10 bg-ink-800/75 p-6 shadow-lg shadow-black/30">
+        <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p class="text-sm uppercase tracking-[0.2em] text-accent-400">FAQ</p>
+            <h3 class="mt-2 text-xl font-semibold text-white">Quick answers</h3>
+          </div>
+          <p class="text-sm text-slate-300">The essentials, at a glance.</p>
+        </div>
+        <div class="mt-4 grid gap-4 md:grid-cols-2">
+          <div class="rounded-2xl border border-white/10 bg-ink-700/70 p-4 text-sm text-slate-200">
+            <p class="font-semibold text-white">How big is Sentry?</p>
+            <p class="mt-2 text-slate-300">
+              The Windows installer is about 23&nbsp;MB. No browser bundle, no extra bloat.
+            </p>
+          </div>
+          <div class="rounded-2xl border border-white/10 bg-ink-700/70 p-4 text-sm text-slate-200">
+            <p class="font-semibold text-white">How much memory does it use?</p>
+            <p class="mt-2 text-slate-300">
+              Idle footprint stays under 10&nbsp;MB of RAM while watching for schedules and triggers.
+            </p>
+          </div>
+          <div class="rounded-2xl border border-white/10 bg-ink-700/70 p-4 text-sm text-slate-200">
+            <p class="font-semibold text-white">Can I restore partially?</p>
+            <p class="mt-2 text-slate-300">
+              Yes. Choose specific files or sets; manifests keep versions tidy for selective restores.
+            </p>
+          </div>
+          <div class="rounded-2xl border border-white/10 bg-ink-700/70 p-4 text-sm text-slate-200">
+            <p class="font-semibold text-white">Does it auto-start and stay quiet?</p>
+            <p class="mt-2 text-slate-300">
+              You can enable start-on-boot and keep Sentry minimized; it runs in the background without popups.
+            </p>
+          </div>
+          <div class="rounded-2xl border border-white/10 bg-ink-700/70 p-4 text-sm text-slate-200">
+            <p class="font-semibold text-white">How do updates work?</p>
+            <p class="mt-2 text-slate-300">
+              Signed releases from GitHub; you can auto-apply updates or trigger them manually from Settings.
+            </p>
+          </div>
+          <div class="rounded-2xl border border-white/10 bg-ink-700/70 p-4 text-sm text-slate-200">
+            <p class="font-semibold text-white">Will it pause during heavy use?</p>
+            <p class="mt-2 text-slate-300">
+              You can throttle or schedule backups for off-hours; runs are lightweight and avoid spiking CPU.
+            </p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <footer class="relative border-t border-white/5 bg-ink-900/85">
+      <div
+        class="mx-auto flex max-w-[1400px] flex-col gap-4 px-8 py-8 md:flex-row md:items-center md:justify-between"
+      >
+        <div class="flex items-center gap-3">
+          <div
+            class="flex h-10 w-10 items-center justify-center rounded-2xl bg-accent-500 text-ink-900 shadow-lg"
+          >
+            <i data-lucide="shield" class="h-5 w-5"></i>
+          </div>
+          <div>
+            <p class="font-semibold text-white">Sentry Backup</p>
+            <p class="text-sm text-slate-400">Desktop-first, interruption-free.</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-3 text-sm text-slate-300">
+          <a
+            class="rounded-full border border-white/10 px-4 py-2 transition hover:border-white/30 hover:text-white"
+            href="https://github.com/IEver3st/Sentry-Releases/releases/tag/v1.0.1"
+          >
+            GitHub
+          </a>
+          <a
+            class="rounded-full border border-white/10 px-4 py-2 transition hover:border-white/30 hover:text-white"
+            href="https://github.com/IEver3st/Sentry-Releases/releases/tag/v1.0.1"
+            data-download
+          >
+            Download
+          </a>
+          <span class="rounded-full border border-white/10 px-4 py-2 text-slate-400">
+            Made with Tauri + React
+          </span>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const releaseUrl = 'https://github.com/IEver3st/Sentry-Releases/releases/tag/v1.0.1'
+        const assetUrl =
+          'https://github.com/IEver3st/Sentry-Releases/releases/download/v1.0.1/Sentry.Backup_1.0.1_x64-setup.exe'
+
+        if (window.lucide) {
+          window.lucide.createIcons()
+        }
+
+        const triggerDownload = () => {
+          const tempAnchor = document.createElement('a')
+          tempAnchor.href = assetUrl
+          tempAnchor.download = 'Sentry.Backup_1.0.1_x64-setup.exe'
+          tempAnchor.style.display = 'none'
+          document.body.appendChild(tempAnchor)
+          tempAnchor.click()
+          tempAnchor.remove()
+        }
+
+        const wireDownloadButtons = () => {
+          const downloadButtons = document.querySelectorAll('[data-download]')
+          downloadButtons.forEach((button) => {
+            button.href = releaseUrl
+            button.setAttribute('download', '')
+            button.addEventListener('click', (event) => {
+              event.preventDefault()
+              triggerDownload()
+            })
+          })
+        }
+
+        wireDownloadButtons()
+      })
+    </script>
+  </body>
+</html>
