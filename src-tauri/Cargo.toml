@@ -1,6 +1,6 @@
 [package]
 name = "sentry"
-version = "1.0.1"
+version = "1.0.2"
 description = "Sentry - Intelligent Backup Management System"
 authors = ["you"]
 edition = "2021"
