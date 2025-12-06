@@ -11,9 +11,7 @@ import {
   Loader2,
   Check,
   RefreshCw,
-  DownloadCloud,
-  AlertCircle,
-  CheckCircle2
+  AlertCircle
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -30,7 +28,7 @@ export function Settings() {
   const { theme, setTheme } = useUIStore()
   const [isDetectingLocation, setIsDetectingLocation] = useState(false)
   const [, setIsSaving] = useState(false)
-  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'none' | 'available' | 'downloading' | 'installed' | 'error'>('idle')
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'disabled' | 'checking' | 'none' | 'available' | 'downloading' | 'installed' | 'error'>('disabled')
   const [updateProgress, setUpdateProgress] = useState<number>(0)
   const [updateMessage, setUpdateMessage] = useState<string | null>(null)
 
@@ -439,31 +437,22 @@ export function Settings() {
                 <div>
                   <Label>Updates</Label>
                   <p className="text-sm text-muted-foreground">
-                    Check for the latest version and install automatically
+                    Automatic updates are disabled as Sentry is feature
+                    complete and not receiving further releases.
                   </p>
                 </div>
                 <Button
-                  variant="default"
+                  variant="secondary"
                   size="sm"
                   onClick={handleCheckForUpdates}
-                  disabled={updateStatus === 'checking' || updateStatus === 'downloading'}
+                  disabled
                   className="flex items-center gap-2"
                 >
-                  {updateStatus === 'checking' || updateStatus === 'downloading' ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : updateStatus === 'installed' ? (
-                    <CheckCircle2 className="w-4 h-4" />
-                  ) : (
-                    <DownloadCloud className="w-4 h-4" />
-                  )}
-                  {updateStatus === 'downloading'
-                    ? 'Updating...'
-                    : updateStatus === 'checking'
-                      ? 'Checking...'
-                      : 'Check for updates'}
+                  <AlertCircle className="w-4 h-4" />
+                  Updates disabled
                 </Button>
               </div>
-              {updateStatus !== 'idle' && updateMessage && (
+              {updateStatus !== 'idle' && updateStatus !== 'disabled' && updateMessage && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground rounded-lg border border-border/50 bg-muted/30 px-3 py-2">
                   {updateStatus === 'error' ? (
                     <AlertCircle className="w-4 h-4 text-destructive" />

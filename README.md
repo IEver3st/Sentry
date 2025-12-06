@@ -16,6 +16,12 @@ bun run tauri dev    # Tauri dev window
 bun run build        # type-check + Vite build
 ```
 
+## Updates
+
+Automatic updates are disabled. Sentry is feature complete and is not planned
+to receive further releases, so the in-app updater will not deliver new
+versions. If you need to reinstall, use the existing installer builds.
+
 ## Google Drive credentials
 
 - Copy `src-tauri/env.example` to `src-tauri/.env` and fill `GOOGLE_DRIVE_CLIENT_ID` and `GOOGLE_DRIVE_CLIENT_SECRET`.
