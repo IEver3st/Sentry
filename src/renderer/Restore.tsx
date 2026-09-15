@@ -1,0 +1,504 @@
+import { useEffect, useState } from "react";
+import {
+  ArrowDownToLine,
+  ChevronLeft,
+  ChevronRight,
+  File,
+  FileClock,
+  Folder,
+  FolderOpen,
+  Pin,
+  Search,
+  ShieldCheck,
+} from "lucide-react";
+import type { FileEntry, Snapshot } from "../shared/contracts";
+import {
+  Button,
+  bytes,
+  date,
+  Empty,
+  Field,
+  Modal,
+  Notice,
+  shortPath,
+  useApp,
+} from "./ui";
+
+export function Restore() {
+  const { state, perform, notify } = useApp();
+  const [destinationId, setDestinationId] = useState(
+    state.destinations[0]?.id || "",
+  );
+  const [planId, setPlanId] = useState("");
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [snapshotOffset, setSnapshotOffset] = useState(0);
+  const [snapshot, setSnapshot] = useState<Snapshot>();
+  const [files, setFiles] = useState<FileEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [fileLoading, setFileLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [target, setTarget] = useState("");
+  const [overwrite, setOverwrite] = useState<"never" | "always">("never");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setQuery(search);
+      setOffset(0);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [search]);
+  useEffect(() => {
+    let active = true;
+    setSnapshot(undefined);
+    setSnapshotOffset(0);
+    setFiles([]);
+    setSelected([]);
+    setError("");
+    if (!destinationId) return;
+    setLoading(true);
+    void window.sentry
+      .request({
+        type: "snapshots",
+        destinationId,
+        planId: planId || undefined,
+      })
+      .then((result) => {
+        if (active) {
+          setSnapshots(result);
+          setSnapshot(result[0]);
+          setOffset(0);
+        }
+      })
+      .catch((cause) => {
+        if (active) setError(String(cause));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [destinationId, planId]);
+  useEffect(() => {
+    let active = true;
+    setError("");
+    if (!snapshot) {
+      setFiles([]);
+      return;
+    }
+    setFileLoading(true);
+    void window.sentry
+      .request({
+        type: "files",
+        destinationId,
+        snapshotId: snapshot.id,
+        search: query,
+        offset,
+        limit: 100,
+      })
+      .then((result) => {
+        if (active) {
+          setFiles(result.entries);
+          setTotal(result.total);
+        }
+      })
+      .catch((cause) => {
+        if (active) setError(String(cause));
+      })
+      .finally(() => {
+        if (active) setFileLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [snapshot, destinationId, query, offset]);
+  async function pinSnapshot() {
+    if (!snapshot) return;
+    const result = await perform({
+      type: "pin",
+      destinationId,
+      snapshotId: snapshot.id,
+      pinned: !snapshot.pinned,
+    });
+    if (result) {
+      // Restic tags rewrite snapshot IDs. Read the new catalog before allowing
+      // another operation against the selected version.
+      const refreshed = await perform({
+        type: "snapshots",
+        destinationId,
+        planId: planId || undefined,
+      });
+      if (refreshed) {
+        setSnapshots(refreshed);
+        setSnapshot(
+          refreshed.find(
+            (item) =>
+              item.time === snapshot.time &&
+              item.planId === snapshot.planId &&
+              item.pinned !== snapshot.pinned,
+          ) || refreshed[0],
+        );
+      }
+    }
+  }
+  return (
+    <>
+      <div className="restore-filters">
+        <Field label="Destination">
+          <select
+            aria-label="Restore destination"
+            value={destinationId}
+            onChange={(e) => setDestinationId(e.target.value)}
+          >
+            <option value="" disabled>
+              Choose a repository
+            </option>
+            {state.destinations.map((destination) => (
+              <option value={destination.id} key={destination.id}>
+                {destination.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Backup plan">
+          <select
+            aria-label="Restore plan"
+            value={planId}
+            onChange={(e) => setPlanId(e.target.value)}
+          >
+            <option value="">All plans, including recovered plans</option>
+            {state.plans.map((plan) => (
+              <option value={plan.id} key={plan.id}>
+                {plan.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      {error && <Notice error>{error}</Notice>}
+      {!state.destinations.length ? (
+        <Empty
+          icon={<FileClock size={28} />}
+          heading="Connect a repository to recover files"
+        >
+          Add a destination in Settings. An existing repository and its password
+          are enough, even after reinstalling Sentry.
+        </Empty>
+      ) : loading ? (
+        <div className="loading-state">Reading snapshots…</div>
+      ) : !snapshots.length ? (
+        <Empty
+          icon={<FileClock size={28} />}
+          heading="No snapshots in this selection"
+        >
+          Create a backup or choose another destination. Only committed
+          snapshots appear here.
+        </Empty>
+      ) : (
+        <div className="restore-browser">
+          <aside className="snapshot-list">
+            <div className="inspector-heading">
+              <h2>Versions</h2>
+              <span>{snapshots.length}</span>
+            </div>
+            <div className="snapshot-scroll">
+              {snapshots
+                .slice(snapshotOffset, snapshotOffset + 50)
+                .map((item) => (
+                  <button
+                    className={snapshot?.id === item.id ? "selected" : ""}
+                    key={item.id}
+                    onClick={() => {
+                      setSnapshot(item);
+                      setSelected([]);
+                      setOffset(0);
+                    }}
+                    aria-pressed={snapshot?.id === item.id}
+                  >
+                    <span className="snapshot-date">
+                      {date(item.time)}
+                      {item.pinned && <Pin size={13} aria-label="Pinned" />}
+                    </span>
+                    <strong>
+                      {item.name || item.planName || "Recovered snapshot"}
+                    </strong>
+                    <small>
+                      {item.incomplete
+                        ? "Incomplete snapshot"
+                        : `${item.paths.length} source${item.paths.length === 1 ? "" : "s"}`}
+                    </small>
+                  </button>
+                ))}
+            </div>
+            {snapshots.length > 50 && (
+              <div className="pagination snapshot-pagination">
+                <Button
+                  size="icon"
+                  aria-label="Previous versions"
+                  disabled={snapshotOffset === 0}
+                  onClick={() =>
+                    setSnapshotOffset(Math.max(0, snapshotOffset - 50))
+                  }
+                >
+                  <ChevronLeft size={14} />
+                </Button>
+                <span>
+                  {snapshotOffset + 1}–
+                  {Math.min(snapshotOffset + 50, snapshots.length)}
+                </span>
+                <Button
+                  size="icon"
+                  aria-label="Next versions"
+                  disabled={snapshotOffset + 50 >= snapshots.length}
+                  onClick={() => setSnapshotOffset(snapshotOffset + 50)}
+                >
+                  <ChevronRight size={14} />
+                </Button>
+              </div>
+            )}
+          </aside>
+          <section className="file-browser">
+            <div className="file-browser-heading">
+              <div>
+                <h2>
+                  {snapshot?.name || snapshot?.planName || "Snapshot files"}
+                </h2>
+                <p>{snapshot ? date(snapshot.time) : "Choose a version"}</p>
+              </div>
+              <div className="button-group">
+                <Button
+                  size="icon"
+                  aria-label={
+                    snapshot?.pinned ? "Unpin snapshot" : "Pin snapshot"
+                  }
+                  aria-pressed={snapshot?.pinned}
+                  onClick={() => void pinSnapshot()}
+                >
+                  <Pin size={15} />
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    if (snapshot)
+                      void perform(
+                        {
+                          type: "test-recovery",
+                          destinationId,
+                          snapshotId: snapshot.id,
+                        },
+                        "Test recovery queued. View its verified result in Activity.",
+                      );
+                  }}
+                >
+                  <ShieldCheck size={15} />
+                  Test recovery
+                </Button>
+              </div>
+            </div>
+            {snapshot?.incomplete && (
+              <Notice error>
+                This snapshot contains skipped or unreadable files. It is not a
+                complete copy.
+              </Notice>
+            )}
+            <div className="search-box">
+              <Search size={15} />
+              <input
+                aria-label="Search backed-up paths"
+                type="search"
+                placeholder="Search backed-up paths"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <div className="file-list" aria-busy={fileLoading}>
+              <div className="file-table-header">
+                <span>Path</span>
+                <span>Size</span>
+              </div>
+              {files.map((entry) => (
+                <label className="file-row" key={entry.path}>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${entry.path}`}
+                    checked={selected.includes(entry.path)}
+                    onChange={(e) =>
+                      setSelected((current) =>
+                        e.target.checked
+                          ? [...current, entry.path]
+                          : current.filter((path) => path !== entry.path),
+                      )
+                    }
+                  />
+                  {entry.type === "dir" ? (
+                    <Folder size={16} />
+                  ) : (
+                    <File size={16} />
+                  )}
+                  <span className="file-path" title={entry.path}>
+                    <strong>{shortPath(entry.path)}</strong>
+                    <small>{entry.path}</small>
+                  </span>
+                  <span className="file-size">
+                    {entry.type === "dir" ? "Folder" : bytes(entry.size)}
+                  </span>
+                </label>
+              ))}
+              {!files.length && (
+                <p className="section-empty">
+                  {fileLoading
+                    ? "Loading files…"
+                    : "No paths match your search."}
+                </p>
+              )}
+            </div>
+            <div className="pagination">
+              <Button
+                size="icon"
+                aria-label="Previous file page"
+                disabled={offset === 0 || fileLoading}
+                onClick={() => setOffset(Math.max(0, offset - 100))}
+              >
+                <ChevronLeft size={15} />
+              </Button>
+              <span>
+                {total
+                  ? `${offset + 1}–${Math.min(offset + 100, total)} of ${total.toLocaleString()} paths`
+                  : "No paths"}
+              </span>
+              <Button
+                size="icon"
+                aria-label="Next file page"
+                disabled={offset + 100 >= total || fileLoading}
+                onClick={() => setOffset(offset + 100)}
+              >
+                <ChevronRight size={15} />
+              </Button>
+            </div>
+            <div className="restore-footer">
+              <div>
+                <strong>
+                  {selected.length
+                    ? `${selected.length} selected`
+                    : "Full snapshot"}
+                </strong>
+                <small>Restored content is verified.</small>
+              </div>
+              {selected.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="small"
+                  onClick={() => setSelected([])}
+                >
+                  Clear selection
+                </Button>
+              )}
+              <Button
+                variant="primary"
+                disabled={!snapshot}
+                onClick={() => setRestoreOpen(true)}
+              >
+                <ArrowDownToLine size={15} />
+                {selected.length ? "Restore selected" : "Restore snapshot"}
+              </Button>
+            </div>
+          </section>
+        </div>
+      )}
+      <Modal
+        open={restoreOpen}
+        onOpenChange={setRestoreOpen}
+        title="Restore files"
+        description={
+          selected.length
+            ? `Restore ${selected.length} selected paths from this snapshot.`
+            : "Restore all files and folders from this snapshot."
+        }
+      >
+        <div className="dialog-body">
+          <Field
+            label="Restore into folder"
+            hint="Choose a separate folder so your current work stays intact."
+          >
+            <div className="input-action">
+              <input
+                aria-label="Restore into folder"
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                placeholder="D:\\Recovered files"
+              />
+              <Button
+                aria-label="Choose restore folder"
+                onClick={async () => {
+                  const paths = await perform({
+                    type: "choose-path",
+                    kind: "folder",
+                  });
+                  if (paths?.[0]) setTarget(paths[0]);
+                }}
+              >
+                <FolderOpen size={16} />
+              </Button>
+            </div>
+          </Field>
+          <Field label="If files already exist">
+            <select
+              aria-label="Restore collision behavior"
+              value={overwrite}
+              onChange={(e) => setOverwrite(e.target.value as typeof overwrite)}
+            >
+              <option value="never">Do not overwrite existing files</option>
+              <option value="always">Overwrite existing files</option>
+            </select>
+          </Field>
+          {overwrite === "always" && (
+            <Notice error>
+              Files at the restore paths will be replaced with the selected
+              backup version.
+            </Notice>
+          )}
+        </div>
+        <div className="dialog-footer">
+          <Button onClick={() => setRestoreOpen(false)}>Cancel</Button>
+          <Button
+            variant="primary"
+            disabled={busy}
+            onClick={async () => {
+              if (!snapshot || !target.trim()) {
+                notify("Choose a restore folder.", true);
+                return;
+              }
+              setBusy(true);
+              try {
+                if (
+                  await perform(
+                    {
+                      type: "restore",
+                      destinationId,
+                      snapshotId: snapshot.id,
+                      target,
+                      paths: selected,
+                      overwrite,
+                    },
+                    "Restore queued. Follow progress and verification in Activity.",
+                  )
+                )
+                  setRestoreOpen(false);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? "Preparing…" : "Restore files"}
+          </Button>
+        </div>
+      </Modal>
+    </>
+  );
+}
