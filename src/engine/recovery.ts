@@ -30,7 +30,13 @@ export async function compareSnapshots(store: Store, engine: ResticEngine, repo:
   store.db.exec("CREATE TEMP TABLE IF NOT EXISTS comparison(path TEXT PRIMARY KEY,change TEXT NOT NULL); DELETE FROM comparison;");
   const insert = store.db.prepare("INSERT OR REPLACE INTO comparison VALUES(?,?)");
   const metadata = await engine.snapshots(repo, signal);
-  const mappings = metadata.filter(s => s.id === before || s.id === after).flatMap(s => engine.mappings(s));
+  const beforeSnapshot = metadata.find(s => s.id === before);
+  const afterSnapshot = metadata.find(s => s.id === after);
+  if (!beforeSnapshot || !afterSnapshot) throw new Error("One of these snapshots is no longer available.");
+  const mappings = engine.mappings(beforeSnapshot);
+  const afterMappings = engine.mappings(afterSnapshot);
+  if (JSON.stringify([...mappings].sort((a, b) => a.original.localeCompare(b.original))) !== JSON.stringify([...afterMappings].sort((a, b) => a.original.localeCompare(b.original))))
+    throw new Error("These snapshots use different database capture paths. Use File history to inspect and recover their individual versions.");
   await engine.diff(repo, before, after, event => {
     if (typeof event.path !== "string" || typeof event.modifier !== "string") return;
     const modifier = event.modifier;

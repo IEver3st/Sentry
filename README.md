@@ -49,7 +49,7 @@ QA uses a fresh profile and disposable sources under `outputs/`. Screenshots sho
 
 ## Background behavior
 
-Closing the window destroys its renderer and keeps Sentry in the tray. Minimize retains the window. Tray controls open Sentry, run enabled plans, or pause protection. Explicit Quit cancels active work and stops scheduling. Protection resumes when Sentry starts again. There is no privileged background service and no protection after the process is terminated.
+Closing the window destroys its renderer and keeps Sentry in the tray. Minimize retains the window. Tray controls open Sentry, run enabled plans, or pause protection. In desktop mode, explicit Quit cancels active work and stops scheduling. Settings > Recovery can export an optional Windows service installer. Once installed under the same Windows account, the service owns the engine and closing or quitting the desktop client leaves protection running. See [recovery features and service setup](docs/recovery.md) for installation and validation boundaries.
 
 Calendar schedules follow the PC's local time zone. Missed occurrences become one catch-up run; monthly days clamp to month end. Sleep/resume and time-zone changes re-evaluate due work. Durable queued jobs survive restart; interrupted jobs remain visible for retry. Repository operations are serialized, and automatic destination failures receive at most two retries with backoff.
 
@@ -59,7 +59,7 @@ Scheduled jobs can wait for AC power, five minutes of idle time or an unmetered 
 
 Google Drive uses browser-based Desktop OAuth, PKCE and a loopback callback. Tokens are persisted with Windows DPAPI through Electron safeStorage. Production client configuration and Google consent verification are external prerequisites. See [Google setup and automation behavior](docs/automation.md) for exact configuration and test boundaries. No fake connection is provided.
 
-Cloud destinations receive their own snapshots through restic's rclone backend. There is no archive staging or mutable-repository mirroring; committed local copies remain independent of incomplete cloud work. A cloud retry deduplicates against uploaded repository objects and scans the sources again. Destinations in one run are sequential ordinary-file snapshots, not a single atomic cross-destination point in time.
+Cloud destinations receive snapshots through restic's rclone backend. By default, destinations capture sources sequentially and backup retries scan sources again. With a copy source selected in Capture & automation, Sentry captures once and copies that committed snapshot to the other repositories. These copies preserve the original capture time and never rescan live files. Each destination retains its own encryption, outcome and retry history. Pending or failed copies hold their source snapshot against pruning until copied or explicitly abandoned.
 
 Weather automation uses the US National Weather Service API. Configure coordinates, alert types, severities and selected plans. Real alerts are checked for coverage, freshness, expiry and duplication; a cooldown limits repeated runs. Priority plans and off-device destinations run first. Simulation describes eligible plans without creating a real protection-history entry. Coverage outside the NWS service area is unavailable. Weather checks supplement regular schedules.
 
@@ -71,7 +71,9 @@ Legacy ZIPs and manifests are never modified. Their changed-file-only archives a
 
 ## Scope and validation
 
-Sentry protects ordinary files. It is not a disk image, bootable system backup, or application-consistent database backup. Close applications that need consistent multi-file state before backing up. The engine supports Windows VSS, but this build does not expose or claim elevated VSS operation.
+Sentry protects files, not a disk image or bootable system backup. Capture & automation offers ordinary files, Windows VSS and live SQLite capture. VSS requires suitable privileges and provides a crash-consistent filesystem snapshot; Sentry does not coordinate arbitrary application writers. SQLite capture uses the online backup API, including committed WAL contents, and validates each database independently. Close other applications that need consistent multi-file state before an ordinary-file backup.
+
+File history provides verified text/image previews, side-by-side versions and recovery of deleted files. Snapshot Changes lists added, changed and deleted paths. Temporary named checkpoints survive retention until their expiry; permanent pins remain available. Optional recovery drills rotate a bounded sample and report the actual files verified. Protection review checks stale copies, disk overlap, exclusions and opt-in discovery folders. Recovery kits contain locations and standalone recovery instructions without passwords; Practice recovery requires a newly entered password and bypasses the saved catalog. Details and limits are in [recovery features](docs/recovery.md).
 
 See [architecture](docs/architecture.md), [engine decision](docs/engine-decision.md), [design](DESIGN.md), [validation](docs/validation.md), [idle performance](docs/performance.md) and [backup responsiveness](docs/stress-validation.md). Physical drive removal, installed login behavior, real Google account transfers and long-duration soak validation must be distinguished from fixture and packaged-executable checks.
 

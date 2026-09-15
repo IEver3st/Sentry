@@ -8,6 +8,14 @@ if (-not $sentryPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Admi
 if ($Action -eq 'Remove') {
   $sentryService = Get-Service -Name $sentryConfig.name -ErrorAction SilentlyContinue
   if ($sentryService) { Stop-Service -Name $sentryConfig.name; & sc.exe delete $sentryConfig.name; if ($LASTEXITCODE -ne 0) { throw 'Service removal failed.' } }
+  $sentryRemoveRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramData $sentryConfig.name))
+  $sentryExpectedRoot = [IO.Path]::GetFullPath($env:ProgramData).TrimEnd('\') + '\'
+  if (-not $sentryRemoveRoot.StartsWith($sentryExpectedRoot,[StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe service removal path.' }
+  foreach ($sentryFile in @('SentryService.exe','service-config.json')) {
+    $sentryRemoveFile = Join-Path $sentryRemoveRoot $sentryFile
+    if (Test-Path -LiteralPath $sentryRemoveFile -PathType Leaf) { Remove-Item -LiteralPath $sentryRemoveFile }
+  }
+  if ((Test-Path -LiteralPath $sentryRemoveRoot) -and @(Get-ChildItem -LiteralPath $sentryRemoveRoot -Force).Count -eq 0) { Remove-Item -LiteralPath $sentryRemoveRoot }
   Write-Output 'Service removed. Reopen Sentry for desktop protection. Backup files and settings were preserved.'
   exit
 }

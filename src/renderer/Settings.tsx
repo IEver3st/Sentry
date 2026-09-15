@@ -123,7 +123,7 @@ export function SettingsPage({ initialTab = "General" }: { initialTab?: Settings
         id={`panel-${tab}`}
         aria-labelledby={`tab-${tab}`}
       >
-        <div className="settings-panel-heading"><h2>{tab}</h2><p>{tab === "General" ? "Appearance and automatic backup preferences." : tab === "Destinations" ? "Manage the repositories that hold your backups." : tab === "Weather" ? "Configure extra backups for severe weather alerts." : tab === "Diagnostics" ? "Inspect resources, collection health and operation logs." : "Review retention, import plans and troubleshoot Sentry."}</p></div>
+        <div className="settings-panel-heading"><h2>{tab}</h2><p>{tab === "General" ? "Appearance and automatic backup preferences." : tab === "Destinations" ? "Manage the repositories that hold your backups." : tab === "Weather" ? "Configure extra backups for severe weather alerts." : tab === "Recovery" ? "Test recovery, review protection and prepare for a replacement PC." : tab === "Diagnostics" ? "Inspect resources, collection health and operation logs." : "Review retention, import plans and troubleshoot Sentry."}</p></div>
         {tab === "General" ? (
           <General />
         ) : tab === "Destinations" ? (

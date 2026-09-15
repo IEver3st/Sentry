@@ -150,6 +150,11 @@ export class BackupService {
       policy: this.policyMessage,
       recoveryDrills: this.store.all<RecoveryDrill>("drill"),
       gaps: this.store.get("gaps", "latest"),
+      finishedDrives: !this.active && !this.running && !this.reserved
+        ? this.store.all<Destination>("destination").filter(d => d.kind === "local" && this.store.get<boolean>("connected", d.id) &&
+          jobs.find(j => j.destinationId === d.id)?.trigger === "drive connected" && jobs.find(j => j.destinationId === d.id)?.status === "success" &&
+          !this.store.queued().some(j => j.destinationId === d.id || j.sourceDestinationId === d.id)).map(d => d.id)
+        : [],
     };
   }
   private liveJobs(jobs: Job[]): Job[] {
@@ -450,6 +455,7 @@ export class BackupService {
         const ids = plans.flatMap((p) =>
           this.enqueuePlan(p, "manual", request),
         );
+        if (request.planId && !ids.length) throw new Error("This plan already has queued or running work. Wait for it to finish before creating another checkpoint.");
         void this.pump();
         return ids;
       }
@@ -532,6 +538,7 @@ export class BackupService {
           job.finishedAt = now();
           this.store.job(job);
         }
+        if (job.kind === "copy" && (job.status === "cancelled" || this.active?.job.id === job.id)) this.resolveCopyAncestors(job);
         this.emit();
         return true;
       }
@@ -560,7 +567,7 @@ export class BackupService {
           progress: undefined,
           retryOf: old.id,
         };
-        this.store.enqueue(job, { ...payload, attempt: 0, notBefore: 0 });
+        this.store.enqueue(job, { ...payload, copyResolved: false, attempt: 0, notBefore: 0 });
         this.emit();
         void this.pump();
         return job.id;
@@ -718,6 +725,14 @@ export class BackupService {
       const id = payload.snapshotId ?? (payload.sourceJobId ? this.store.getJob(payload.sourceJobId).snapshotId : undefined);
       return !snapshotId || id === snapshotId;
     });
+  }
+  private resolveCopyAncestors(job: Job) {
+    let previous = job.retryOf;
+    while (previous) {
+      const old = this.store.get<JobPayload>("payload", previous);
+      if (old) this.store.put("payload", previous, { ...old, copyResolved: true });
+      previous = this.store.getJob(previous).retryOf;
+    }
   }
   private enqueuePlan(
     plan: Plan,
@@ -1150,12 +1165,7 @@ export class BackupService {
       d.verification = "Copied snapshot committed; repository structure verified";
       d.status = "ready";
       d.error = undefined;
-      let previous = job.retryOf;
-      while (previous) {
-        const old = this.store.get<JobPayload>("payload", previous);
-        if (old) this.store.put("payload", previous, { ...old, copyResolved: true });
-        previous = this.store.getJob(previous).retryOf;
-      }
+      this.resolveCopyAncestors(job);
       job.progress = 1;
     } else if (request?.type === "restore") {
       this.validateRestoreTarget(request.target);

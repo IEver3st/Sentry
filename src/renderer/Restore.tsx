@@ -54,6 +54,7 @@ export function Restore({ connect, plans }: { connect: () => void; plans: () => 
   const [overwrite, setOverwrite] = useState<"never" | "always">("never");
   const [busy, setBusy] = useState(false);
   const [historyPath, setHistoryPath] = useState<string | undefined>(state.historyPath);
+  useEffect(() => { if (state.historyPath) setHistoryPath(state.historyPath); }, [state.historyPath, state.historyRequest]);
   const [pendingRestore, setPendingRestore] = useState<{ snapshot: Snapshot; paths: string[] }>();
   useEffect(() => { if (pendingRestore && snapshot?.id === pendingRestore.snapshot.id) { setSelected(pendingRestore.paths); setRestoreOpen(true); setPendingRestore(undefined); } }, [pendingRestore, snapshot]);
   const selectRecovery = (version: Snapshot, paths: string[]) => {
@@ -521,7 +522,7 @@ export function Restore({ connect, plans }: { connect: () => void; plans: () => 
           </Button>
         </div>
       </Modal>
-      {historyPath !== undefined && <FileHistory initialPath={historyPath} onClose={() => setHistoryPath(undefined)} onRestore={(version, path) => selectRecovery(version, [path])} />}
+      {historyPath !== undefined && <FileHistory key={state.historyRequest} initialPath={historyPath} initialDestination={destinationId} onClose={() => setHistoryPath(undefined)} onRestore={(version, path) => selectRecovery(version, [path])} />}
     </div>
   );
 }

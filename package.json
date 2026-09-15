@@ -17,6 +17,9 @@
     "package:dir": "bun run build && electron-builder --win dir --x64",
     "qa": "node --experimental-strip-types scripts/qa.ts",
     "test:service": "bun scripts/test-service.ts",
+    "test:recovery": "bun scripts/test-recovery.ts",
+    "qa:recovery": "node --experimental-strip-types scripts/qa-recovery.ts",
+    "qa:background": "node --experimental-strip-types scripts/qa-background.ts",
     "benchmark": "node --experimental-strip-types scripts/benchmark.ts"
   },
   "dependencies": {

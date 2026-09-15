@@ -233,6 +233,8 @@ export interface State {
   recoveryDrills?: RecoveryDrill[];
   gaps?: GapScan;
   historyPath?: string;
+  historyRequest?: number;
+  finishedDrives?: string[];
   background?: BackgroundStatus;
 }
 export interface UpdateState {

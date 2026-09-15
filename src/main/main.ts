@@ -31,10 +31,11 @@ const serviceHost = process.argv.includes("--service-host");
 let backgroundClient: BackgroundClient | undefined;
 let backgroundServer: BackgroundServer | undefined;
 let historyPath: string | undefined;
+let historyRequest = 0;
 function historyArgument(args: string[]) {
   const index = args.indexOf("--history");
   const value = index >= 0 ? args[index + 1] : undefined;
-  if (value && /^[A-Za-z]:[\\/]/.test(value) && !/[\0\r\n]/.test(value) && value.length <= 32760) historyPath = value;
+  if (value && /^(?:[A-Za-z]:[\\/]|\\\\)/.test(value) && !/[\0\r\n]/.test(value) && value.length <= 32760) { historyPath = value; historyRequest++; }
 }
 historyArgument(process.argv);
 // This utility renders text and controls, not video or 3D. Avoid retaining a large
@@ -48,11 +49,35 @@ let worker: ChildProcess;
 let quitting = false;
 let installing = false;
 let updates: SoftwareUpdates;
+function titleBarOverlay() {
+  const theme = current?.settings.theme ?? "dark";
+  const dark = theme === "dark" || (theme === "system" && nativeTheme.shouldUseDarkColors);
+  return {
+    color: dark ? "#141922" : "#edf1f7",
+    symbolColor: dark ? "#edf2fa" : "#192332",
+    // Native overlay height is in window DIPs; the CSS titlebar scales with zoom.
+    // Keep the native controls above the workspace's first border pixel.
+    height: Math.floor(34 * (current?.settings.uiScale ?? 100) / 100),
+  };
+}
+function syncWindowAppearance() {
+  if (!win || win.isDestroyed()) return;
+  const scale = (current?.settings.uiScale ?? 100) / 100;
+  if (win.webContents.getZoomFactor() !== scale) win.webContents.setZoomFactor(scale);
+  win.setTitleBarOverlay(titleBarOverlay());
+}
 function publishState() {
+  syncWindowAppearance();
   if (current && win && !win.isDestroyed() && !win.isMinimized())
     win.webContents.send("sentry:state", decorate(current));
 }
-function decorate(state: State): State { return { ...state, update: updates?.state ?? state.update, historyPath, background: { mode: backgroundClient || serviceHost ? "service" : "desktop", installed: !!backgroundClient || serviceHost, detail: backgroundClient || serviceHost ? "Connected to background protection. Closing this window does not stop the service." : "Desktop protection stops when Sentry quits or you sign out." } }; }
+function decorate(state: State): State {
+  const service = serviceHost || backgroundClient?.mode === "service";
+  const disconnected = backgroundClient && !backgroundClient.connected;
+  return { ...state, update: updates?.state ?? state.update, historyPath, historyRequest,
+    policy: disconnected ? "Background connection lost. Displayed results are from the last connection. Reopen Sentry to reconnect." : state.policy,
+    background: { mode: service ? "service" : "desktop", installed: service, detail: disconnected ? "The background host disconnected. Reopen Sentry to check whether protection is running." : service ? "Connected to background protection. Closing this window does not stop the service." : "Desktop protection stops when Sentry quits or you sign out." } };
+}
 const diagnosticLog = new DiagnosticLog();
 let previousWorkerCpu: { at: number; total: number } | undefined;
 let diagnosticsFlight: Promise<DiagnosticsSnapshot> | undefined;
@@ -154,7 +179,7 @@ function show() {
     backgroundColor: "#101319",
     icon: join(root, "assets/sentry.ico"),
     titleBarStyle: "hidden",
-    titleBarOverlay: { color: "#101319", symbolColor: "#edf2fa", height: 40 },
+    titleBarOverlay: titleBarOverlay(),
     webPreferences: {
       preload: join(compiled, "preload.cjs"),
       contextIsolation: true,
@@ -165,7 +190,7 @@ function show() {
     },
   });
   win.webContents.on("did-finish-load", () => {
-    win?.webContents.setZoomFactor((current?.settings.uiScale ?? 100) / 100);
+    syncWindowAppearance();
   });
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (event) => event.preventDefault());
@@ -228,7 +253,7 @@ function updateTray() {
   );
 }
 async function quit() {
-  if (backgroundClient) { quitting = true; backgroundClient.close(); app.quit(); return; }
+  if (backgroundClient) { quitting = true; backgroundClient.close(); setImmediate(() => app.quit()); return; }
   if (current?.busy && !qa && !serviceHost) {
     const result = await dialog.showMessageBox({
       type: "question",
@@ -300,8 +325,9 @@ else {
     .then(async () => {
       await mkdir(data, { recursive: true });
       updates = new SoftwareUpdates(app.isPackaged && !qa && !serviceHost, publishState, autoUpdater);
+      nativeTheme.on("updated", syncWindowAppearance);
       if (!serviceHost) {
-        const client = new BackgroundClient(data, state => { current = state; publishState(); updateTray(); }, () => { if (backgroundClient && !quitting) { diagnosticLog.add({ source: "engine", level: "error", message: "Background service disconnected" }); } });
+        const client = new BackgroundClient(data, state => { current = state; publishState(); updateTray(); }, () => { if (backgroundClient && !quitting) { diagnosticLog.add({ source: "engine", level: "error", message: "Background service disconnected" }); publishState(); } });
         if (await client.connect()) backgroundClient = client;
       }
       if (!backgroundClient) {
@@ -334,6 +360,7 @@ else {
             ),
           );
         pending.clear();
+        if (serviceHost && !quitting) { app.exit(1); return; }
         if (installing && code === 0) { quitting = true; updates.install(); }
         else if (installing) { installing = false; updates.set({ status: "error", message: "Backup worker did not shut down cleanly. Restart Sentry before updating." }); }
         else if (quitting) app.quit();
@@ -358,21 +385,7 @@ else {
           current = m.value as State;
           backgroundServer?.publish(current);
           diagnosticLog.observe(current);
-          if (win && !win.isDestroyed()) {
-            const scale = current.settings.uiScale / 100;
-            if (win.webContents.getZoomFactor() !== scale) win.webContents.setZoomFactor(scale);
-            const dark =
-              current.settings.theme === "dark" ||
-              (current.settings.theme === "system" &&
-                nativeTheme.shouldUseDarkColors);
-            win.setTitleBarOverlay({
-              color: dark ? "#141922" : "#edf1f7",
-              symbolColor: dark ? "#edf2fa" : "#182436",
-              height: 34,
-            });
-            if (!win.isMinimized())
-              publishState();
-          }
+          publishState();
           updateTray();
         }
         if (m.kind === "secret") {
@@ -455,7 +468,7 @@ else {
             return { ok: true, value: await explorerIntegration(process.execPath, request.enabled) };
           }
           if (request.type === "background-service") {
-            if (request.action === "status") return { ok: true, value: await backgroundStatus(data, !!backgroundClient) };
+            if (request.action === "status") return { ok: true, value: await backgroundStatus(data, !!backgroundClient?.connected && backgroundClient.mode === "service") };
             if (qa || !app.isPackaged) throw new Error("Export service setup from the installed application at its permanent location.");
             const selected = await dialog.showOpenDialog(win, { title: "Choose an empty folder for service setup", properties: ["openDirectory", "createDirectory"] });
             if (selected.canceled || !selected.filePaths[0]) return { ok: true, value: { mode: "desktop", installed: false, detail: "Setup export cancelled." } };

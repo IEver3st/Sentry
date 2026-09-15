@@ -3,11 +3,12 @@ import { ArrowDownToLine, ChevronLeft, ChevronRight, FolderOpen, Search } from "
 import type { FilePreview, FileVersion, Snapshot } from "../shared/contracts";
 import { Button, Field, Modal, Notice, Select, bytes, date, useApp } from "./ui";
 
-export function FileHistory({ initialPath = "", onClose, onRestore }: { initialPath?: string; onClose: () => void; onRestore: (snapshot: Snapshot, path: string) => void }) {
+export function FileHistory({ initialPath = "", initialDestination, onClose, onRestore }: { initialPath?: string; initialDestination?: string; onClose: () => void; onRestore: (snapshot: Snapshot, path: string) => void }) {
   const { state, perform } = useApp();
   const [path, setPath] = useState(initialPath);
   const [query, setQuery] = useState(initialPath);
-  const [destination, setDestination] = useState(state.destinations[0]?.id ?? "");
+  const [destination, setDestination] = useState(initialDestination ?? state.destinations[0]?.id ?? "");
+  const [reload, setReload] = useState(0);
   const [offset, setOffset] = useState(0);
   const [versions, setVersions] = useState<FileVersion[]>([]);
   const [total, setTotal] = useState(0);
@@ -27,7 +28,7 @@ export function FileHistory({ initialPath = "", onClose, onRestore }: { initialP
       if (active) { setVersions(result.versions); setTotal(result.total); setSelected(result.versions.find(v => v.file)); }
     }).catch(error => { if (active) setError(String(error)); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [query, destination, offset]);
+  }, [query, destination, offset, reload]);
   useEffect(() => {
     let active = true;
     setPreview(undefined); setOther(undefined);
@@ -46,7 +47,7 @@ export function FileHistory({ initialPath = "", onClose, onRestore }: { initialP
   }, [selected, comparison, destination]);
   return <Modal open onOpenChange={onClose} title="File history" description="Find a previous version, including files that have been deleted." wide>
     <div className="dialog-body">
-      <form className="history-search" onSubmit={e => { e.preventDefault(); setOffset(0); setQuery(path.trim()); }}>
+      <form className="history-search" onSubmit={e => { e.preventDefault(); setOffset(0); setQuery(path.trim()); setReload(reload + 1); }}>
         <Field label="File path"><div className="input-action"><input aria-label="File history path" value={path} onChange={e => setPath(e.target.value)} placeholder="C:\Users\…\notes.txt" /><Button aria-label="Choose file for history" onClick={async () => { const paths = await perform({ type: "choose-path", kind: "file" }); if (paths?.[0]) { setPath(paths[0]); setQuery(paths[0]); setOffset(0); } }}><FolderOpen size={15} /></Button></div></Field>
         <Field label="Repository"><Select aria-label="History repository" value={destination} onValueChange={v => { setDestination(v); setOffset(0); }}>{state.destinations.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</Select></Field>
         <Button type="submit" disabled={loading || !path.trim() || !destination}><Search size={15} />Find versions</Button>

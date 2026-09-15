@@ -2,6 +2,7 @@ import { createServer, createConnection, type Socket, type Server } from "node:n
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile, writeFile, mkdir, copyFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
 import type { Request, State } from "../shared/contracts";
 import { requestSchema } from "../shared/contracts";
 
@@ -9,6 +10,16 @@ export function serviceName(data: string) { return "Sentry-" + createHash("sha25
 const endpoint = (data: string) => process.platform === "win32" ? `\\\\.\\pipe\\${serviceName(data)}` : join(data, "background.sock");
 const tokenPath = (data: string) => join(data, "background-token");
 const MAX_MESSAGE = 16 * 1024 * 1024;
+async function protectToken(file: string) {
+  if (process.platform !== "win32") return;
+  const script = `$ErrorActionPreference='Stop'; $sentryAcl=[IO.File]::GetAccessControl($env:SENTRY_TOKEN_FILE); $sentryUser=[Security.Principal.WindowsIdentity]::GetCurrent().User; $sentryAcl.SetAccessRuleProtection($true,$false); foreach($sentryExisting in @($sentryAcl.Access)) { [void]$sentryAcl.RemoveAccessRuleAll($sentryExisting) }; foreach($sentrySid in @($sentryUser.Value,'S-1-5-18','S-1-5-32-544')) { $sentryRule=[Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sentrySid),'FullControl','Allow'); $sentryAcl.AddAccessRule($sentryRule) }; [IO.File]::SetAccessControl($env:SENTRY_TOKEN_FILE,$sentryAcl)`;
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], { shell: false, windowsHide: true, env: { ...process.env, SENTRY_TOKEN_FILE: file }, stdio: "ignore" });
+    const timer = setTimeout(() => { child.kill(); reject(new Error("Could not secure background authentication.")); }, 10000);
+    child.once("error", e => { clearTimeout(timer); reject(e); });
+    child.once("close", code => { clearTimeout(timer); if (code === 0) resolve(); else reject(new Error("Could not secure background authentication.")); });
+  });
+}
 const proof = (token: string, challenge: string) => createHmac("sha256", token).update(challenge).digest("hex");
 function equalProof(expected: string, value: unknown) { return typeof value === "string" && /^[a-f0-9]{64}$/.test(value) && timingSafeEqual(Buffer.from(expected), Buffer.from(value)); }
 function reader(socket: Socket, receive: (value: Record<string, unknown>) => void) {
@@ -39,6 +50,7 @@ export class BackgroundServer {
     try { token = await readFile(tokenPath(this.data), "utf8"); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; token = randomBytes(32).toString("hex"); try { await writeFile(tokenPath(this.data), token, { flag: "wx", mode: 0o600 }); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; token = await readFile(tokenPath(this.data), "utf8"); } }
     if (!/^[a-f0-9]{64}$/.test(token)) throw new Error("Background authentication file is invalid. Original file was preserved.");
+    await protectToken(tokenPath(this.data));
     this.server = createServer(socket => {
       let authenticated = false;
       let challenge: string | undefined;
@@ -74,6 +86,7 @@ export class BackgroundClient {
   private sequence = 0;
   private socket?: Socket;
   mode: "desktop" | "service" = "service";
+  connected = false;
   constructor(private data: string, private publish: (state: State) => void, private disconnected: () => void) {}
   async connect(): Promise<boolean> {
     let token: string;
@@ -89,6 +102,7 @@ export class BackgroundClient {
         if (!settled) { settled = true; clearTimeout(timer); if (["ENOENT", "ECONNREFUSED"].includes(error.code ?? "")) resolve(false); else reject(error); }
       });
       socket.on("close", () => {
+        this.connected = false;
         if (!settled) { settled = true; clearTimeout(timer); reject(new Error("Background service rejected authentication.")); }
         for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error("Background service disconnected. Reopen Sentry to reconnect.")); } this.pending.clear();
         this.disconnected();
@@ -96,7 +110,7 @@ export class BackgroundClient {
       reader(socket, message => {
         if (message.kind === "challenge" && !verifiedServer && typeof message.nonce === "string" && /^[a-f0-9]{64}$/.test(message.nonce) && equalProof(proof(token, nonce + ":server"), message.proof)) { verifiedServer = true; send(socket, { proof: proof(token, message.nonce + ":client") }); return; }
         if (!verifiedServer) { socket.destroy(); return; }
-        if (message.kind === "hello" && !settled) { settled = true; clearTimeout(timer); this.mode = message.mode === "service" ? "service" : "desktop"; if (message.state) this.publish(message.state as State); resolve(true); }
+        if (message.kind === "hello" && !settled) { settled = true; clearTimeout(timer); this.connected = true; this.mode = message.mode === "service" ? "service" : "desktop"; if (message.state) this.publish(message.state as State); resolve(true); }
         if (message.kind === "state") this.publish(message.value as State);
         if (message.kind === "response") { const p = this.pending.get(String(message.id)); if (!p) return; clearTimeout(p.timer); this.pending.delete(String(message.id)); if (message.error) p.reject(new Error(String(message.error))); else p.resolve(message.value); }
       });

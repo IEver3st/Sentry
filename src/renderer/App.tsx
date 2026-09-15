@@ -75,7 +75,7 @@ export function App() {
   useEffect(() => {
     if (state && onboarding === undefined) setOnboarding(shouldStartOnboarding(state));
   }, [state, onboarding]);
-  useEffect(() => { if (state?.historyPath) setPage("Restore"); }, [state?.historyPath]);
+  useEffect(() => { if (state?.historyPath) setPage("Restore"); }, [state?.historyPath, state?.historyRequest]);
   const refresh = useCallback(async () => {
     setState(await window.sentry.request({ type: "state" }));
   }, []);
@@ -756,7 +756,7 @@ export function JobRow({ job }: { job: Job }) {
         </button>
         <div className="job-time">
           {date(job.finishedAt || job.startedAt || job.createdAt)}
-          <small>{job.kind === "test-recovery" && job.recoveredFiles !== undefined ? `${job.recoveredFiles} files verified · ${bytes(job.recoveryBytes ?? 0)}` : bytes(job.transferred) + " transferred"}</small>
+          <small>{job.kind === "test-recovery" && job.recoveredFiles !== undefined ? `${job.recoveredFiles} files verified · ${bytes(job.recoveryBytes ?? 0)}` : job.kind === "copy" ? job.status === "success" ? "Captured version copied" : "Snapshot copy" : bytes(job.transferred) + " transferred"}</small>
         </div>
         <div className="job-outcome">
           <Status status={job.status} />
@@ -834,6 +834,7 @@ export function JobRow({ job }: { job: Job }) {
             </p>
           )}
           {job.error && <Notice error>{job.error}</Notice>}
+          {job.kind === "copy" && ["failed", "partial", "interrupted"].includes(job.status) && <Confirm title="Abandon this copy?" description="The source snapshot will no longer be held for this copy and can expire under its retention policy. This destination remains unprotected by this attempt." action="Abandon copy" onConfirm={async () => { await perform({ type: "cancel", id: job.id }, "Copy abandoned. The source retention hold was removed."); }}><Button size="small">Abandon copy</Button></Confirm>}
         </div>
       )}
     </div>
