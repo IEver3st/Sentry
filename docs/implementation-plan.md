@@ -11,4 +11,4 @@
 
 Ownership: root owns shared contracts, main/preload, worker orchestration and integration; engine agent owns executable acquisition/proof/adapter; automation agent owns scheduling/weather/OAuth modules; frontend agent owns renderer and design implementation. Root reviews integrated changes and makes coherent commits. No release or main overwrite.
 
-Implementation and integration are complete on `rebuild/electron`. The Windows candidate is packaged and exercised with isolated native fixtures. [Validation](validation.md) records passing checks and external configuration/platform gaps; [performance](performance.md) records the missed memory targets. These gaps remain acceptance limits, not simulated successes.
+Implementation and integration are maintained on `main`, following the user-authorized branch consolidation on 2026-09-15. The Windows candidate is packaged and exercised with isolated native fixtures. [Validation](validation.md) records passing checks and external configuration/platform gaps; [performance](performance.md) records the missed memory targets. These gaps remain acceptance limits, not simulated successes.

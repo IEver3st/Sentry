@@ -2,7 +2,7 @@
 
 Sentry keeps encrypted, versioned copies of important files on Windows. Create a plan, choose its sources and destinations, and recover files from dated snapshots. Local backup does not require an account.
 
-This repository is the Electron rebuild on `rebuild/electron`. It uses React, strict TypeScript, Bun, Vite, Radix/shadcn primitives and SQLite. The backup worker runs restic 0.19.1; rclone 1.75.1 supplies Google Drive transport. No Tauri or Rust application backend is included.
+This repository is the Electron rebuild, maintained on `main`. It uses React, strict TypeScript, Bun, Vite, Radix/shadcn primitives and SQLite. The backup worker runs restic 0.19.1; rclone 1.75.1 supplies Google Drive transport. No Tauri or Rust application backend is included.
 
 ## Run and build
 
