@@ -135,7 +135,8 @@ try {
     .getByLabel("Files and folders", { exact: true })
     .fill(plan.sources.join("\n"));
   await page.getByRole("checkbox", { name: /Local recovery fixture/ }).check();
-  await page.getByLabel("Schedule frequency").selectOption("manual");
+  await page.getByRole("combobox", { name: "Schedule frequency" }).click();
+  await page.getByRole("option", { name: "Manually", exact: true }).click();
   await page.getByRole("button", { name: "Save plan", exact: true }).click();
   await page.getByRole("dialog").waitFor({ state: "hidden" });
   const saved = (await request({ type: "state" })).plans.find(
@@ -244,6 +245,36 @@ try {
     .first()
     .click();
   await shot("08-settings-light");
+  const theme = page.getByRole("combobox", { name: "Color theme" });
+  await theme.click();
+  await shot("09-dropdown-light");
+  await page.keyboard.press("Escape");
+  if (!(await theme.evaluate((el) => el === document.activeElement))) throw new Error("Select focus did not return");
+  const battery = page.getByRole("switch", { name: "Pause automatic backups on battery", exact: true });
+  const previous = await battery.isChecked();
+  await battery.focus();
+  await page.keyboard.press("Space");
+  await page.waitForFunction((before) => {
+    const input = document.querySelector('input[role="switch"][aria-describedby]');
+    return !!input && before !== undefined;
+  }, previous);
+  await page.waitForTimeout(200);
+  if ((await battery.isChecked()) === previous) throw new Error("Switch keyboard change failed");
+  await page.keyboard.press("Space");
+  await theme.click();
+  await page.keyboard.press("d");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+  await shot("10-settings-dark");
+  await theme.click();
+  await shot("11-dropdown-dark");
+  await page.keyboard.press("Escape");
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(820, 600));
+  await theme.click();
+  await shot("12-controls-compact-dark");
+  evidence.controlsCompact = await overflow(page);
+  await page.keyboard.press("Escape");
+
   await page.keyboard.press("Tab");
   evidence.keyboard = await page.evaluate(() => ({
     tag: document.activeElement?.tagName,
@@ -252,6 +283,10 @@ try {
   }));
   evidence.errors = errors;
   await page.emulateMedia({ reducedMotion: "reduce" });
+  evidence.controlMotion = await battery.evaluate((el) => ({
+    track: getComputedStyle(el).transitionDuration,
+    thumb: getComputedStyle(el, "::before").transitionDuration,
+  }));
   evidence.reducedMotion = await page.evaluate(
     () => matchMedia("(prefers-reduced-motion: reduce)").matches,
   );

@@ -246,22 +246,17 @@ code {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  background: var(--rail);
 }
 .titlebar {
   height: 34px;
   min-height: 34px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   background: var(--rail);
   -webkit-app-region: drag;
   user-select: none;
-  border-bottom: 1px solid var(--border);
-}
-.titlebar-name {
-  font-size: 11px;
-  margin-left: 16px;
-  color: var(--muted);
 }
 .window-controls {
   display: none;
@@ -291,7 +286,6 @@ code {
   width: 184px;
   flex: none;
   background: var(--rail);
-  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   padding: 22px 10px 12px;
@@ -305,18 +299,22 @@ code {
 .brand img {
   object-fit: contain;
 }
+.titlebar > .brand {
+  margin-right: auto;
+  padding: 0 20px;
+  gap: 8px;
+}
+.titlebar > .brand img {
+  width: 28px;
+  height: 28px;
+}
+.titlebar > .brand > span {
+  font-size: 15px;
+}
 .brand > span {
   font-size: 18px;
   letter-spacing: -0.4px;
   font-weight: 600;
-}
-.brand small {
-  display: block;
-  font-size: 10px;
-  font-weight: 400;
-  letter-spacing: 0.15px;
-  color: var(--muted);
-  margin-top: 1px;
 }
 .sidebar nav {
   display: grid;
@@ -347,54 +345,13 @@ code {
   font-size: 10px;
   margin-left: auto;
 }
-.sidebar-bottom {
-  margin-top: auto;
-  padding: 20px 5px 0;
-}
-.protection-switch {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 0;
-  background: none;
-  width: 100%;
-  padding: 8px 6px;
-  color: var(--muted);
-  font-size: 11px;
-  text-align: left;
-}
-.protection-switch:hover {
-  color: var(--text);
-  background: var(--hover);
-  border-radius: 4px;
-}
-.engine-state {
-  font-size: 10px;
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  color: var(--subtle);
-  padding: 10px 6px 20px;
-  line-height: 1.4;
-}
-.engine-state i {
-  margin-top: 4px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--good);
-  flex: none;
-}
-.engine-state i.paused {
-  background: var(--warn);
-}
-.studio {
-  font-size: 9px;
-  letter-spacing: 1.6px;
-  padding: 0 6px;
-  color: var(--subtle);
-}
 .workspace {
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  border-right: 0;
+  border-bottom: 0;
+  border-top-left-radius: 12px;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -409,32 +366,12 @@ code {
   padding: 27px 30px 23px;
   flex: none;
 }
-.page-header p {
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 5px;
-}
 .page-content {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   padding: 0 30px 30px;
   scrollbar-gutter: stable;
-}
-.statusbar {
-  min-height: 29px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 16px;
-  border-top: 1px solid var(--border);
-  font-size: 10px;
-  color: var(--subtle);
-  font-variant-numeric: tabular-nums;
-}
-.statusbar-dot {
-  margin: 0 7px;
 }
 .startup {
   display: grid;
@@ -1406,15 +1343,37 @@ code {
   color: var(--accent);
   border-bottom-color: var(--accent);
 }
-.settings-panel {
+.workspace-settings .page-header {
+  width: min(100%, 950px);
+  margin-inline: auto;
+  overflow-y: auto;
+  scrollbar-gutter: stable both-edges;
+}
+.workspace-settings .page-content {
+  scrollbar-gutter: stable both-edges;
+}
+.workspace-settings .page-content > * {
   max-width: 860px;
+  margin-inline: auto;
+}
+.application-details {
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.application-details summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.application-details p {
+  margin-top: 10px;
 }
 .settings-section {
-  padding: 23px 0;
+  padding: 18px 0;
   border-bottom: 1px solid var(--border);
 }
 .settings-section > h2 {
-  margin-bottom: 17px;
+  margin-bottom: 12px;
   font-size: 13px;
 }
 .settings-section > .hint {
@@ -1598,9 +1557,6 @@ code {
   .page-content {
     padding: 0 22px 25px;
   }
-  .page-header p {
-    max-width: 370px;
-  }
   .welcome-state {
     padding: 34px 12px;
     gap: 23px;
@@ -1661,20 +1617,11 @@ code {
     padding: 21px 18px 20px;
     align-items: flex-start;
   }
-  .page-header p {
-    font-size: 11px;
-  }
   .page-header h1 {
     font-size: 20px;
   }
   .page-content {
     padding: 0 18px 22px;
-  }
-  .statusbar {
-    font-size: 9px;
-  }
-  .statusbar > span:last-child {
-    display: none;
   }
   .welcome-state {
     padding: 27px 0;
@@ -1800,8 +1747,7 @@ code {
     padding: 0 5px 24px;
   }
   .brand > span,
-  .sidebar nav button > span,
-  .sidebar-bottom {
+  .sidebar nav button > span {
     display: none;
   }
   .sidebar nav button {
@@ -1817,9 +1763,6 @@ code {
   .page-header {
     flex-wrap: wrap;
     gap: 12px;
-  }
-  .page-header p {
-    font-size: 11px;
   }
   .welcome-state {
     gap: 13px;
@@ -1919,9 +1862,6 @@ code {
   .weather-status {
     gap: 14px;
   }
-  .statusbar {
-    padding: 6px 12px;
-  }
   .inline-checks {
     gap: 10px;
   }
@@ -1972,4 +1912,149 @@ code {
   gap: 7px;
   justify-content: space-between;
   border-top: 1px solid var(--border);
+}
+
+/* Shared control finish: compact geometry, quiet blue state, interruptible motion. */
+:root {
+  --control-speed: 140ms;
+  --control-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--subtle) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--subtle);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--muted); }
+::-webkit-scrollbar-corner { background: transparent; }
+input[type="checkbox"] {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  width: 17px;
+  height: 17px;
+  min-height: 17px;
+  padding: 0;
+  border-color: var(--subtle);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color var(--control-speed), border-color var(--control-speed);
+}
+input[type="checkbox"]::before {
+  content: "";
+  width: 8px;
+  height: 5px;
+  border-left: 2px solid white;
+  border-bottom: 2px solid white;
+  transform: translateY(-1px) rotate(-45deg) scale(0.6);
+  opacity: 0;
+  transition: transform var(--control-speed) var(--control-ease), opacity var(--control-speed);
+}
+input[type="checkbox"]:checked { background: var(--primary); border-color: var(--primary); }
+input[type="checkbox"]:checked::before { opacity: 1; transform: translateY(-1px) rotate(-45deg) scale(1); }
+.check-field { min-height: 28px; align-items: center; cursor: pointer; }
+.check-field:has(:disabled) { opacity: 0.45; cursor: default; }
+input[type="checkbox"]:disabled { cursor: default; }
+.toggle-field input[type="checkbox"] {
+  display: block;
+  position: relative;
+  width: 34px;
+  height: 20px;
+  min-height: 20px;
+  border-radius: 12px;
+  background: var(--hover);
+  margin: 0;
+}
+.toggle-field input[type="checkbox"]::before {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--muted);
+  opacity: 1;
+  transform: translateX(0);
+  transition: transform 160ms var(--control-ease), background-color var(--control-speed);
+}
+.toggle-field input[type="checkbox"]:checked { background: var(--primary); }
+.toggle-field input[type="checkbox"]:checked::before { transform: translateX(14px); background: white; }
+.select-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  min-height: 33px;
+  padding: 7px 9px;
+  background: var(--field);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  text-align: left;
+  transition: border-color var(--control-speed), background-color var(--control-speed);
+}
+.select-trigger > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-chevron { display: flex; color: var(--muted); transition: transform 160ms var(--control-ease); }
+.select-trigger[data-state="open"] { border-color: var(--accent); }
+.select-trigger[data-state="open"] .select-chevron { transform: rotate(180deg); }
+.select-content {
+  z-index: 150;
+  min-width: var(--radix-select-trigger-width);
+  max-width: min(480px, calc(100vw - 20px));
+  max-height: var(--radix-select-content-available-height);
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px #0003;
+  transform-origin: var(--radix-select-content-transform-origin);
+  animation: select-in 140ms var(--control-ease);
+}
+.select-viewport { padding: 4px; }
+.select-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 30px 6px 9px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  user-select: none;
+}
+.select-item[data-highlighted] { background: var(--hover); outline: 2px solid var(--accent); outline-offset: -2px; }
+.select-item[data-state="checked"] { color: var(--accent); background: var(--selection); }
+.select-item[data-disabled] { color: var(--subtle); cursor: default; }
+.select-check { position: absolute; right: 8px; display: flex; }
+.select-scroll { display: flex; justify-content: center; padding: 4px; color: var(--muted); }
+.setting-row > .select-trigger { width: 180px; flex: none; }
+.button:active:not(:disabled) { transform: translateY(1px); }
+input:not([type="checkbox"]):disabled, textarea:disabled { opacity: 0.45; cursor: default; }
+@media (hover: hover) and (pointer: fine) {
+  .select-trigger:hover:not(:disabled), input:hover:not(:disabled), textarea:hover:not(:disabled) { border-color: var(--subtle); }
+  .check-field:hover input:not(:disabled) { border-color: var(--accent); }
+}
+@keyframes select-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .select-content { animation: none; }
+  .select-chevron, .select-trigger, input[type="checkbox"], input[type="checkbox"]::before { transition: none; }
+  .button:active:not(:disabled) { transform: none; }
+}
+@media (forced-colors: active) {
+  input[type="checkbox"] { appearance: auto; }
+  input[type="checkbox"]::before { display: none; }
+  .select-item[data-state="checked"] { color: HighlightText; background: Highlight; }
+  .select-content { border-color: CanvasText; }
 }

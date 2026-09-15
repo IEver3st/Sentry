@@ -1,4 +1,6 @@
 import {
+  Children,
+  isValidElement,
   createContext,
   useContext,
   useEffect,
@@ -8,11 +10,12 @@ import {
   type ButtonHTMLAttributes,
   type ReactNode,
 } from "react";
+import * as SelectPrimitive from "@radix-ui/react-select";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Slot } from "@radix-ui/react-slot";
 import { cva } from "class-variance-authority";
 import { clsx } from "clsx";
-import { AlertCircle, Check, X } from "lucide-react";
+import { AlertCircle, Check, ChevronDown, ChevronUp, X } from "lucide-react";
 import type { Request, ResponseMap, State } from "../shared/contracts";
 
 export const buttonVariants = cva("button", {
@@ -77,7 +80,7 @@ export function Field({
   const id = useId();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const input = ref.current?.querySelector("input,select,textarea");
+    const input = ref.current?.querySelector("button[role=combobox],input,select,textarea");
     if (input) {
       input.id = id;
       if (hint) input.setAttribute("aria-describedby", `${id}-hint`);
@@ -95,30 +98,74 @@ export function Field({
     </div>
   );
 }
+// Prefix values so an empty domain value remains a selectable Radix item.
+export function Select({ children, value, defaultValue, onValueChange, ...props }: {
+  children: ReactNode;
+  value?: string | number;
+  defaultValue?: string;
+  onValueChange: (value: string) => void;
+  disabled?: boolean;
+  "aria-label"?: string;
+}) {
+  return (
+    <SelectPrimitive.Root
+      value={value === undefined ? undefined : `value:${value}`}
+      defaultValue={defaultValue === undefined ? undefined : `value:${defaultValue}`}
+      onValueChange={(next) => onValueChange(next.slice(6))}
+      disabled={props.disabled}
+    >
+      <SelectPrimitive.Trigger className="select-trigger" aria-label={props["aria-label"]}>
+        <SelectPrimitive.Value />
+        <SelectPrimitive.Icon className="select-chevron"><ChevronDown size={15} /></SelectPrimitive.Icon>
+      </SelectPrimitive.Trigger>
+      <SelectPrimitive.Portal>
+        <SelectPrimitive.Content className="select-content" position="popper" sideOffset={5} collisionPadding={10}>
+          <SelectPrimitive.ScrollUpButton className="select-scroll"><ChevronUp size={14} /></SelectPrimitive.ScrollUpButton>
+          <SelectPrimitive.Viewport className="select-viewport">
+            {Children.toArray(children).map((child) => {
+              if (!isValidElement<{ value?: string | number; disabled?: boolean; children: ReactNode }>(child)) return null;
+              const option = child.props;
+              return <SelectPrimitive.Item className="select-item" key={child.key} value={`value:${option.value ?? String(option.children)}`} disabled={option.disabled}>
+                <SelectPrimitive.ItemText>{option.children}</SelectPrimitive.ItemText>
+                <SelectPrimitive.ItemIndicator className="select-check"><Check size={14} /></SelectPrimitive.ItemIndicator>
+              </SelectPrimitive.Item>;
+            })}
+          </SelectPrimitive.Viewport>
+          <SelectPrimitive.ScrollDownButton className="select-scroll"><ChevronDown size={14} /></SelectPrimitive.ScrollDownButton>
+        </SelectPrimitive.Content>
+      </SelectPrimitive.Portal>
+    </SelectPrimitive.Root>
+  );
+}
 export function CheckField({
   label,
   checked,
   onChange,
   hint,
   disabled,
+  toggle = false,
 }: {
   label: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
   hint?: string;
   disabled?: boolean;
+  toggle?: boolean;
 }) {
+  const hintId = useId();
   return (
-    <label className="check-field">
+    <label className={clsx("check-field", toggle && "toggle-field")}>
       <input
         type="checkbox"
+        role={toggle ? "switch" : undefined}
+        aria-describedby={hint ? hintId : undefined}
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
       />
       <span>
         {label}
-        {hint && <small>{hint}</small>}
+        {hint && <small id={hintId}>{hint}</small>}
       </span>
     </label>
   );

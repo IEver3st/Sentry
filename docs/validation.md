@@ -46,3 +46,9 @@ The final package backed up **4,001 files / 137,760,328 bytes** in **13.177 seco
 - Installer is unsigned. A packaged executable smoke test does not establish trusted-publisher signing or a clean-machine installation lifecycle.
 
 Performance measurements and their process-tree boundaries are maintained separately in [performance.md](performance.md).
+
+## In-app branding, September 15, 2026
+
+Used the supplied logo unchanged as `public/sentry-mark.png` for the title-bar brand, loading state and welcome state. Moved the Sentry brand to the top-left title-bar area above sidebar navigation. The existing working-tree removal of the File protection subtitle is preserved.
+
+Validation: `bun run typecheck`, `bun run lint`, `bun test` (15 passed, 84 assertions), and `bun run build` passed. A hidden/offscreen Electron smoke check confirmed the brand text is Sentry, both rendered logo assets load, and the window stays hidden. Screenshot inspected: `outputs/branding/overview.png`; readback: `outputs/branding/results.json`. No installer or release was produced for this change.

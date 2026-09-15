@@ -10,6 +10,7 @@ import {
 import type { Destination, Plan, Preview } from "../shared/contracts";
 import {
   Button,
+  Select,
   bytes,
   CheckField,
   Field,
@@ -78,14 +79,14 @@ export function DestinationForm({
           />
         </Field>
         <Field label="Storage">
-          <select
+          <Select
             aria-label="Storage"
             value={kind}
-            onChange={(e) => setKind(e.target.value as typeof kind)}
+            onValueChange={(value) => setKind(value as typeof kind)}
           >
             <option value="local">Drive or network share</option>
             <option value="gdrive">Google Drive</option>
-          </select>
+          </Select>
         </Field>
       </div>
       {kind === "gdrive" && !state.googleConnected && (
@@ -386,13 +387,13 @@ export function PlanEditor({
           <h3>Schedule</h3>
           <div className="form-grid">
             <Field label="Run">
-              <select
+              <Select
                 aria-label="Schedule frequency"
                 value={plan.schedule.kind}
-                onChange={(e) =>
+                onValueChange={(value) =>
                   update("schedule", {
                     ...plan.schedule,
-                    kind: e.target.value as Plan["schedule"]["kind"],
+                    kind: value as Plan["schedule"]["kind"],
                   })
                 }
               >
@@ -401,7 +402,7 @@ export function PlanEditor({
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly</option>
                 <option value="monthly">Monthly</option>
-              </select>
+              </Select>
             </Field>
             {plan.schedule.kind === "interval" && (
               <Field label="Every (minutes)">
@@ -437,13 +438,13 @@ export function PlanEditor({
             )}
             {plan.schedule.kind === "weekly" && (
               <Field label="Day">
-                <select
+                <Select
                   aria-label="Weekday"
                   value={plan.schedule.weekday}
-                  onChange={(e) =>
+                  onValueChange={(value) =>
                     update("schedule", {
                       ...plan.schedule,
-                      weekday: Number(e.target.value),
+                      weekday: Number(value),
                     })
                   }
                 >
@@ -460,7 +461,7 @@ export function PlanEditor({
                       {day}
                     </option>
                   ))}
-                </select>
+                </Select>
               </Field>
             )}
             {plan.schedule.kind === "monthly" && (
@@ -482,7 +483,8 @@ export function PlanEditor({
             )}
           </div>
           <CheckField
-            label="Enable this plan"
+            toggle
+          label="Enable this plan"
             checked={plan.enabled}
             onChange={(v) => update("enabled", v)}
           />
@@ -495,11 +497,11 @@ export function PlanEditor({
             label="Start from a preset"
             hint="Presets replace the patterns below. Review them before saving. Git history and configuration are kept unless you exclude them."
           >
-            <select
+            <Select
               aria-label="File preset"
               defaultValue="Custom"
-              onChange={(e) => {
-                const preset = presets[e.target.value];
+              onValueChange={(value) => {
+                const preset = presets[value];
                 setIncludeText(preset.includes.join("\n"));
                 setExcludeText(preset.excludes.join("\n"));
                 setPreview(undefined);
@@ -508,7 +510,7 @@ export function PlanEditor({
               {Object.keys(presets).map((name) => (
                 <option key={name}>{name}</option>
               ))}
-            </select>
+            </Select>
           </Field>
           <div className="two-column">
             <Field
@@ -637,7 +639,8 @@ export function PlanEditor({
             />
           </Field>
           <CheckField
-            label="Suspend automatic pruning"
+            toggle
+          label="Suspend automatic pruning"
             checked={plan.pruningSuspended}
             onChange={(v) => update("pruningSuspended", v)}
             hint="Keep versions while investigating unexpected file changes."

@@ -14,6 +14,7 @@ import {
 import type { FileEntry, Snapshot } from "../shared/contracts";
 import {
   Button,
+  Select,
   bytes,
   date,
   Empty,
@@ -151,10 +152,10 @@ export function Restore() {
     <>
       <div className="restore-filters">
         <Field label="Destination">
-          <select
+          <Select
             aria-label="Restore destination"
             value={destinationId}
-            onChange={(e) => setDestinationId(e.target.value)}
+            onValueChange={(value) => setDestinationId(value)}
           >
             <option value="" disabled>
               Choose a repository
@@ -164,13 +165,13 @@ export function Restore() {
                 {destination.name}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field label="Backup plan">
-          <select
+          <Select
             aria-label="Restore plan"
             value={planId}
-            onChange={(e) => setPlanId(e.target.value)}
+            onValueChange={(value) => setPlanId(value)}
           >
             <option value="">All plans, including recovered plans</option>
             {state.plans.map((plan) => (
@@ -178,7 +179,7 @@ export function Restore() {
                 {plan.name}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
       </div>
       {error && <Notice error>{error}</Notice>}
@@ -448,14 +449,14 @@ export function Restore() {
             </div>
           </Field>
           <Field label="If files already exist">
-            <select
+            <Select
               aria-label="Restore collision behavior"
               value={overwrite}
-              onChange={(e) => setOverwrite(e.target.value as typeof overwrite)}
+              onValueChange={(value) => setOverwrite(value as typeof overwrite)}
             >
               <option value="never">Do not overwrite existing files</option>
               <option value="always">Overwrite existing files</option>
-            </select>
+            </Select>
           </Field>
           {overwrite === "always" && (
             <Notice error>

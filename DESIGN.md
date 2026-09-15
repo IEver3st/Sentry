@@ -20,7 +20,7 @@ Anti-reference: SaaS dashboards, giant headings, nested cards, decorative graphs
 
 ## Implemented interaction system
 
-The primary shell uses a 34px draggable Windows titlebar with explicit minimize, maximize and close-to-tray actions. The navigation rail remains fixed while each page owns its scroll area. At compact widths the rail reduces; at high zoom it becomes an icon rail with accessible button names. The status footer describes ordinary file backup without claiming application or system consistency.
+The primary shell uses a 34px draggable Windows titlebar with explicit minimize, maximize and close-to-tray actions. The titlebar and fixed navigation rail share one continuous surface; the workspace meets them with a 12px upper-left corner. At compact widths the rail reduces; at high zoom it becomes an icon rail with accessible button names. Pages own their scroll areas. Repeated page descriptions and the status footer are omitted.
 
 Overview opens on a source-to-destination protection ledger once plans exist. Each copy uses durable per-plan/per-destination last-success and last-attempt records. An incomplete, failed, cancelled, or unavailable destination remains visible even if another destination succeeded. The empty state uses the supplied ribbon asset with direct create-plan and connect-repository actions.
 
@@ -28,7 +28,11 @@ Backup plans expand in place. A focused Radix dialog groups sources, inline dest
 
 Restore keeps snapshot dates in a left pane and paginated file paths in the adjoining browser. Selection persists across file pages; an empty selection means a full snapshot. The restore dialog defaults to no overwrite and asks for a separate output folder. Sample recovery and pinning live beside snapshot details. Activity exposes destination outcomes, counts, timestamps and errors, with retries scoped to the failed job.
 
-Settings uses General, Destinations, Weather and Maintenance sections. Unsupported OAuth configuration is an actionable unavailable state. Weather simulation is labeled separately from real alert checks. Background behavior and limits are explained next to their controls.
+Settings uses General, Destinations, Weather and Maintenance sections in a centered column capped at 860px. General owns the pause control. Units and consequential warnings remain visible; engine details and background behavior sit under About Sentry. Unsupported OAuth configuration is an actionable unavailable state. Weather simulation is labeled separately from real alert checks.
+
+## Shell decluttering contract · 2026-09-15
+
+Authority: the user's annotated Settings screenshot. Preserve compact Windows typography, existing theme tokens, navigation, and validated IPC. Join the rail and titlebar without a horizontal seam; retain one quiet curved workspace boundary. Align Settings heading, tabs and fields in a centered column, with all General actions visible at 1180×780 and scrolling available at 820×600 and 200% zoom. Remove duplicate branding, generic page subtext and bottom status copy. Keep meaningful failures, recovery warnings, units and accessible controls. No cards, new palette or decorative effects.
 
 Implementation references: [Means](https://frommeans.com/), [Apple HIG layout](https://developer.apple.com/design/human-interface-guidelines/layout), [Apple HIG motion](https://developer.apple.com/design/human-interface-guidelines/motion), frontend-design desktop/interaction/accessibility guidance. Apple pages were consulted but their live body requires JavaScript; no platform-specific implementation claim is based on inaccessible text.
 

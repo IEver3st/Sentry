@@ -15,6 +15,7 @@ import {
 import type { Destination, Settings } from "../shared/contracts";
 import {
   Button,
+  Select,
   bytes,
   CheckField,
   Confirm,
@@ -142,56 +143,58 @@ function General() {
         <div className="setting-row">
           <div>
             <strong>Color theme</strong>
-            <p>Follow Windows or choose your own appearance.</p>
           </div>
-          <select
+          <Select
             aria-label="Color theme"
             value={state.settings.theme}
-            onChange={(e) =>
-              change({ theme: e.target.value as Settings["theme"] })
+            onValueChange={(value) =>
+              change({ theme: value as Settings["theme"] })
             }
           >
             <option value="system">System</option>
             <option value="dark">Dark</option>
             <option value="light">Light</option>
-          </select>
+          </Select>
         </div>
       </section>
       <section className="settings-section">
         <h2>Background protection</h2>
         <CheckField
+          label="Pause automatic backups"
+          checked={state.settings.paused}
+          onChange={(value) => change({ paused: value })}
+        />
+        <CheckField
+          toggle
           label="Start Sentry when I sign in"
           checked={state.settings.startAtLogin}
           onChange={(value) => change({ startAtLogin: value })}
-          hint="Starts in the tray and checks for missed backups."
         />
         <CheckField
+          toggle
           label="Pause automatic backups on battery"
           checked={state.settings.pauseOnBattery}
           onChange={(value) => change({ pauseOnBattery: value })}
         />
         <CheckField
+          toggle
           label="Run automatic backups only when idle"
           checked={state.settings.idleOnly}
           onChange={(value) => change({ idleOnly: value })}
         />
         <CheckField
+          toggle
           label="Allow automatic transfers on metered networks"
           checked={state.settings.allowMetered}
           onChange={(value) => change({ allowMetered: value })}
         />
-        <div className="inline-note">
-          Closing the window keeps Sentry in the tray. Quitting Sentry stops
-          scheduling until you open it again. Backups protect ordinary files,
-          not a running system or application-consistent database.
-        </div>
       </section>
       <section className="settings-section">
         <h2>Transfers</h2>
         <div className="setting-row">
           <div>
             <strong>Bandwidth limit</strong>
-            <p>KiB/s per transfer. Set 0 for unlimited.</p>
+            <p>KiB/s per transfer · 0 = unlimited</p>
           </div>
           <div className="input-action bandwidth-input">
             <input
@@ -213,7 +216,6 @@ function General() {
         <div className="setting-row">
           <div>
             <strong>Sentry</strong>
-            <p>{state.engineVersion || "Engine version unavailable"}</p>
           </div>
           <Confirm
             title="Quit Sentry?"
@@ -226,6 +228,15 @@ function General() {
             <Button>Quit Sentry</Button>
           </Confirm>
         </div>
+        <details className="application-details">
+          <summary>About Sentry</summary>
+          <p>{state.engineVersion || "Engine version unavailable"}</p>
+          <p>
+            Closing the window keeps Sentry in the tray. Quitting stops scheduled
+            backups. Backups protect ordinary files, not a running system or
+            application-consistent database.
+          </p>
+        </details>
       </section>
     </>
   );
@@ -243,9 +254,6 @@ function Destinations() {
         <div className="section-heading">
           <div>
             <h2>Backup destinations</h2>
-            <p className="hint">
-              Repositories stay recoverable without this application's catalog.
-            </p>
           </div>
           <Button size="small" onClick={() => setAdd(true)}>
             <Plus size={15} />
@@ -595,6 +603,7 @@ function Weather() {
           <CloudLightning size={24} />
         </div>
         <CheckField
+          toggle
           label="Enable weather automation"
           checked={weather.enabled}
           onChange={(value) => update("enabled", value)}
@@ -807,13 +816,13 @@ function Maintenance() {
         </p>
         <div className="two-column">
           <Field label="Plan">
-            <select
+            <Select
               aria-label="Retention plan"
               value={planId}
-              onChange={(e) => {
-                setPlanId(e.target.value);
+              onValueChange={(value) => {
+                setPlanId(value);
                 setDestinationId(
-                  state.plans.find((item) => item.id === e.target.value)
+                  state.plans.find((item) => item.id === value)
                     ?.destinationIds[0] || "",
                 );
                 setPreviewReady(false);
@@ -828,14 +837,14 @@ function Maintenance() {
                   {item.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </Field>
           <Field label="Destination">
-            <select
+            <Select
               aria-label="Retention destination"
               value={destinationId}
-              onChange={(e) => {
-                setDestinationId(e.target.value);
+              onValueChange={(value) => {
+                setDestinationId(value);
                 setPreviewReady(false);
                 setPreview(undefined);
               }}
@@ -850,7 +859,7 @@ function Maintenance() {
                     {item.name}
                   </option>
                 ))}
-            </select>
+            </Select>
           </Field>
         </div>
         {plan && (

@@ -141,7 +141,10 @@ export function App() {
   const shell = (
     <>
       <header className="titlebar">
-        <span className="titlebar-name">Sentry</span>
+        <div className="brand">
+          <img src="./sentry-mark.png" alt="" width={28} height={28} />
+          <span>Sentry</span>
+        </div>
         <div className="window-controls">
           <button
             aria-label="Minimize"
@@ -171,7 +174,7 @@ export function App() {
       <div className="app-shell">
         {shell}
         <main className="startup">
-          <img src="./sentry-ribbon.png" alt="Sentry" width={54} height={54} />
+          <img src="./sentry-mark.png" alt="Sentry" width={54} height={54} />
           <h1>{error ? "Sentry needs attention" : "Opening Sentry"}</h1>
           <p>{error || "Loading your backup plans…"}</p>
           {error && (
@@ -198,12 +201,6 @@ export function App() {
         {shell}
         <div className="app-body">
           <aside className="sidebar">
-            <div className="brand">
-              <img src="./sentry-icon.png" alt="" width={34} height={34} />
-              <span>
-                Sentry<small>File protection</small>
-              </span>
-            </div>
             <nav aria-label="Main navigation">
               {pages.map(({ name, icon: Icon }) => (
                 <button
@@ -223,65 +220,11 @@ export function App() {
                 </button>
               ))}
             </nav>
-            <div className="sidebar-bottom">
-              <button
-                className="protection-switch"
-                onClick={() =>
-                  void perform({
-                    type: "settings",
-                    settings: {
-                      ...state.settings,
-                      paused: !state.settings.paused,
-                    },
-                  })
-                }
-              >
-                {state.settings.paused ? (
-                  <Play size={15} />
-                ) : (
-                  <Pause size={15} />
-                )}
-                <span>
-                  {state.settings.paused
-                    ? "Resume protection"
-                    : "Pause protection"}
-                </span>
-              </button>
-              <div className="engine-state">
-                <i className={state.settings.paused ? "paused" : ""} />
-                <span>
-                  {state.settings.paused
-                    ? "Protection paused"
-                    : state.busy
-                      ? "Work in progress"
-                      : state.plans.some((plan) => plan.enabled)
-                        ? state.plans.some(
-                            (plan) =>
-                              plan.enabled && plan.schedule.kind !== "manual",
-                          )
-                          ? "Ready for scheduled backups"
-                          : "Ready for manual backups"
-                        : "No plans enabled"}
-                </span>
-              </div>
-              <span className="studio">BY MEANS</span>
-            </div>
           </aside>
-          <main className="workspace" id="main-content">
+          <main className={`workspace${page === "Settings" ? " workspace-settings" : ""}`} id="main-content">
             <div className="page-header">
               <div>
                 <h1>{page}</h1>
-                <p>
-                  {page === "Overview"
-                    ? "Your files, their copies, and anything that needs attention."
-                    : page === "Backup Plans"
-                      ? "Choose what to protect and when."
-                      : page === "Restore"
-                        ? "Find a version and bring your files back."
-                        : page === "Activity"
-                          ? "A durable record of every backup and recovery."
-                          : "Protection preferences and connected storage."}
-                </p>
               </div>
               <div className="button-group">
                 {page === "Overview" && (
@@ -346,22 +289,6 @@ export function App() {
               {page === "Activity" && <ActivityPage />}
               {page === "Settings" && <SettingsPage />}
             </div>
-            <footer className="statusbar">
-              <span>
-                {state.destinations.length} destination
-                {state.destinations.length === 1 ? "" : "s"} ·{" "}
-                {state.plans.filter((plan) => plan.enabled).length} enabled plan
-                {state.plans.filter((plan) => plan.enabled).length === 1
-                  ? ""
-                  : "s"}
-              </span>
-              <span>
-                {activeJobs.length
-                  ? `${activeJobs.length} operation${activeJobs.length === 1 ? "" : "s"} pending`
-                  : "Ordinary file backup"}
-                <span className="statusbar-dot">·</span>Encrypted with restic
-              </span>
-            </footer>
           </main>
         </div>
       </div>
@@ -411,7 +338,7 @@ function Overview({
     return (
       <>
         <div className="welcome-state">
-          <img src="./sentry-ribbon.png" alt="" />
+          <img src="./sentry-mark.png" alt="" />
           <div>
             <h2>No files are protected yet.</h2>
             <p>
