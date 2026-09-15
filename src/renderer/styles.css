@@ -303,6 +303,7 @@ code {
   margin-right: auto;
   padding: 0 20px;
   gap: 8px;
+  transform: translateY(10px);
 }
 .titlebar > .brand img {
   width: 28px;
@@ -1344,10 +1345,13 @@ code {
   border-bottom-color: var(--accent);
 }
 .workspace-settings .page-header {
-  width: min(100%, 950px);
-  margin-inline: auto;
+  display: block;
   overflow-y: auto;
   scrollbar-gutter: stable both-edges;
+}
+.workspace-settings .page-header > div:first-child {
+  max-width: 860px;
+  margin-inline: auto;
 }
 .workspace-settings .page-content {
   scrollbar-gutter: stable both-edges;
@@ -2058,3 +2062,17 @@ input:not([type="checkbox"]):disabled, textarea:disabled { opacity: 0.45; cursor
   .select-item[data-state="checked"] { color: HighlightText; background: Highlight; }
   .select-content { border-color: CanvasText; }
 }
+
+/* Keep app utilities anchored while primary navigation stays easy to scan. */
+.sidebar { min-height: 0; }
+.sidebar > nav:first-child { overflow-y: auto; }
+.sidebar nav.sidebar-bottom { margin-top: auto; padding-top: 12px; flex-shrink: 0; }
+.sidebar nav button { position: relative; transition: background-color 120ms, color 120ms; }
+.sidebar nav button > svg { flex-shrink: 0; }
+.sidebar nav button:disabled { cursor: default; }
+.sidebar nav button:disabled:hover { background: transparent; color: var(--muted); }
+.sidebar nav button[aria-current="page"]::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; background: var(--accent); border-radius: 2px; }
+.sidebar .update-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 12px; }
+.update-copy small { color: var(--muted); font-size: 11px; line-height: 1.4; }
+@media (max-width: 600px) { .sidebar .update-copy { display: none; } }
+@media (prefers-reduced-motion: reduce) { .sidebar nav button { transition: none; } }

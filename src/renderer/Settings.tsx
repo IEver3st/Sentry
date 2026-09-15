@@ -1,6 +1,8 @@
 import { useState } from "react";
 import {
   ArrowDownToLine,
+  SlidersHorizontal,
+  Wrench,
   Cloud,
   CloudLightning,
   FolderOpen,
@@ -63,7 +65,7 @@ function retentionSummary(result: unknown): string {
 export function SettingsPage() {
   const [tab, setTab] = useState<SettingsTab>("General");
   return (
-    <>
+    <div className="settings-layout">
       <div
         className="settings-tabs"
         role="tablist"
@@ -86,9 +88,9 @@ export function SettingsPage() {
                   "Maintenance",
                 ];
                 let next: SettingsTab | undefined;
-                if (event.key === "ArrowRight")
+                if (event.key === "ArrowRight" || event.key === "ArrowDown")
                   next = options[(options.indexOf(tab) + 1) % options.length];
-                if (event.key === "ArrowLeft")
+                if (event.key === "ArrowLeft" || event.key === "ArrowUp")
                   next =
                     options[
                       (options.indexOf(tab) + options.length - 1) %
@@ -104,6 +106,7 @@ export function SettingsPage() {
               }}
               tabIndex={tab === name ? 0 : -1}
             >
+              {name === "General" ? <SlidersHorizontal size={16} aria-hidden="true" /> : name === "Destinations" ? <HardDrive size={16} aria-hidden="true" /> : name === "Weather" ? <CloudLightning size={16} aria-hidden="true" /> : <Wrench size={16} aria-hidden="true" />}
               {name}
             </button>
           ),
@@ -115,6 +118,7 @@ export function SettingsPage() {
         id={`panel-${tab}`}
         aria-labelledby={`tab-${tab}`}
       >
+        <div className="settings-panel-heading"><h2>{tab}</h2><p>{tab === "General" ? "Appearance and automatic backup preferences." : tab === "Destinations" ? "Manage the repositories that hold your backups." : tab === "Weather" ? "Configure extra backups for severe weather alerts." : "Review retention, import plans and troubleshoot Sentry."}</p></div>
         {tab === "General" ? (
           <General />
         ) : tab === "Destinations" ? (
@@ -125,24 +129,27 @@ export function SettingsPage() {
           <Maintenance />
         )}
       </div>
-    </>
+    </div>
   );
 }
 function General() {
   const { state, perform } = useApp();
   const [bandwidth, setBandwidth] = useState(state.settings.bandwidthKiB);
-  const change = (patch: Partial<Settings>) =>
-    void perform({
-      type: "settings",
-      settings: { ...state.settings, ...patch },
-    });
+  const [saving, setSaving] = useState(false);
+  const change = async (patch: Partial<Settings>) => {
+    setSaving(true);
+    try { await perform({ type: "settings", settings: { ...state.settings, ...patch } }); }
+    finally { setSaving(false); }
+  };
   return (
     <>
+      <fieldset className="general-settings" disabled={saving} aria-busy={saving}>
       <section className="settings-section">
         <h2>Appearance</h2>
         <div className="setting-row">
           <div>
             <strong>Color theme</strong>
+            <p>Use a light, dark or system-matched appearance.</p>
           </div>
           <Select
             aria-label="Color theme"
@@ -156,17 +163,29 @@ function General() {
             <option value="light">Light</option>
           </Select>
         </div>
+        <div className="setting-row">
+          <div><strong>UI scale</strong><p>Resize text and controls throughout Sentry.</p></div>
+          <div className="scale-controls">
+            <Select aria-label="UI scale" disabled={saving} value={String(state.settings.uiScale)} onValueChange={(value) => void change({ uiScale: Number(value) })}>
+              {[80, 90, 100, 110, 125, 150, 175, 200].map((scale) => <option key={scale} value={String(scale)}>{scale}%{scale === 100 ? " (default)" : ""}</option>)}
+            </Select>
+            <Button disabled={saving || state.settings.uiScale === 100} onClick={() => void change({ uiScale: 100 })}>Reset</Button>
+          </div>
+        </div>
       </section>
       <section className="settings-section">
         <h2>Background protection</h2>
         <CheckField
+          toggle
           label="Pause automatic backups"
+          hint="Manual backups remain available while paused."
           checked={state.settings.paused}
           onChange={(value) => change({ paused: value })}
         />
         <CheckField
           toggle
           label="Start Sentry when I sign in"
+          hint="Keep scheduled protection available after restarting Windows."
           checked={state.settings.startAtLogin}
           onChange={(value) => change({ startAtLogin: value })}
         />
@@ -238,6 +257,7 @@ function General() {
           </p>
         </details>
       </section>
+      </fieldset>
     </>
   );
 }
@@ -971,36 +991,7 @@ function Maintenance() {
         </Button>
         {exportPath && <Notice>Saved to {exportPath}</Notice>}
       </section>
-      <section className="settings-section">
-        <h2>Updates</h2>
-        <div className="setting-row">
-          <div>
-            <strong>{state.update.status}</strong>
-            <p>
-              {state.update.version
-                ? `Available version: ${state.update.version}`
-                : "Check when you are ready. Downloads wait for active jobs."}
-            </p>
-          </div>
-          <div className="button-group">
-            <Button
-              onClick={() => void perform({ type: "updates", action: "check" })}
-            >
-              Check for updates
-            </Button>
-            {state.update.url && (
-              <Button
-                disabled={state.busy}
-                onClick={() =>
-                  void perform({ type: "updates", action: "download" })
-                }
-              >
-                Download update
-              </Button>
-            )}
-          </div>
-        </div>
-      </section>
+
     </>
   );
 }

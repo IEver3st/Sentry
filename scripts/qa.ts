@@ -255,14 +255,15 @@ try {
   await battery.focus();
   await page.keyboard.press("Space");
   await page.waitForFunction((before) => {
-    const input = document.querySelector('input[role="switch"][aria-describedby]');
-    return !!input && before !== undefined;
+    const field = [...document.querySelectorAll(".toggle-field")].find((el) => el.textContent?.includes("Pause automatic backups on battery"));
+    return field?.querySelector("input")?.checked !== before;
   }, previous);
-  await page.waitForTimeout(200);
   if ((await battery.isChecked()) === previous) throw new Error("Switch keyboard change failed");
   await page.keyboard.press("Space");
   await theme.click();
+  await page.getByRole("option", { name: "Light", exact: true }).focus();
   await page.keyboard.press("d");
+  await page.waitForFunction(() => document.activeElement?.textContent?.includes("Dark"));
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
   await shot("10-settings-dark");

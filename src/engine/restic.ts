@@ -40,6 +40,9 @@ export interface BackupOptions extends SourceRules {
   name?: string;
   pin?: boolean;
   vss?: boolean;
+  checkpointUntil?: string;
+  capture?: string;
+  sourceMap?: Array<{ original: string; captured: string }>;
 }
 export interface RestoreOptions {
   snapshotId: string;
@@ -178,6 +181,9 @@ export class ResticEngine {
       "RESTIC_PASSWORD_COMMAND",
       "RESTIC_PASSWORD_FILE",
       "RESTIC_REPOSITORY_FILE",
+      "RESTIC_FROM_PASSWORD_COMMAND",
+      "RESTIC_FROM_PASSWORD_FILE",
+      "RESTIC_FROM_REPOSITORY_FILE",
     ])
       delete (env as Record<string, string | undefined>)[key];
     const child = spawn(this.options.executable, [...common, ...args], {
@@ -440,6 +446,10 @@ export class ResticEngine {
       if (options.name)
         args.push("--tag", `sentry:name:${safeTag(options.name)}`);
       if (options.pin) args.push("--tag", "sentry:pinned");
+      if (options.checkpointUntil) args.push("--tag", `sentry:checkpoint:${options.checkpointUntil}`);
+      if (options.capture) args.push("--tag", `sentry:capture:${options.capture}`);
+      for (const mapping of options.sourceMap ?? [])
+        args.push("--tag", `sentry:map:${safeTag(JSON.stringify(mapping))}`);
       if (options.vss) args.push("--use-fs-snapshot");
       // Explicit rules remain active during backup, including files created after preview.
       for (const pattern of options.excludes ?? [])
@@ -489,6 +499,28 @@ export class ResticEngine {
     );
     return snapshots;
   }
+  async copy(source: Repository, target: Repository, id: string, signal?: AbortSignal): Promise<string> {
+    if (source.location === target.location) throw new Error("Choose a different repository for the copy.");
+    const sourceSnapshot = (await this.snapshots(source, signal)).find(s => s.id === snapshotId(id));
+    if (!sourceSnapshot || sourceSnapshot.tags?.includes("sentry:incomplete"))
+      throw new Error("Only a complete committed snapshot can be copied.");
+    const copyRepo = { ...target, env: { ...source.env, ...target.env, RESTIC_FROM_PASSWORD: source.password } };
+    await this.run(copyRepo, ["copy", "--from-repo", source.location, id], undefined, signal);
+    const copied = (await this.snapshots(target, signal)).find(s =>
+      s.id === id || (s as ResticSnapshot & { original?: string }).original === id);
+    if (!copied) throw new Error("The copied snapshot could not be confirmed in the destination repository.");
+    await this.check(target, false, signal);
+    return copied.id;
+  }
+  async diff(repo: Repository, before: string, after: string, onEntry: Listener, signal?: AbortSignal) {
+    await this.run(repo, ["diff", snapshotId(before), snapshotId(after)], onEntry, signal);
+  }
+  mappings(snapshot: ResticSnapshot): Array<{ original: string; captured: string }> {
+    return (snapshot.tags ?? []).filter(t => t.startsWith("sentry:map:")).map(t => {
+      const m = JSON.parse(Buffer.from(t.slice(11), "base64url").toString()) as { original: string; captured: string };
+      return { original: safeSnapshotPath(snapshotPath(m.original)), captured: safeSnapshotPath(snapshotPath(m.captured)) };
+    });
+  }
   async list(
     repo: Repository,
     id: string,
@@ -523,11 +555,18 @@ export class ResticEngine {
       .map((t) =>
         Buffer.from(t.slice("sentry:source:".length), "base64url").toString(),
       );
+    const mappings = this.mappings(snapshot);
     const selected = options.paths?.length
       ? options.paths.map(safeSnapshotPath)
-      : (savedSources?.length ? savedSources : snapshot.paths).map(
+      : mappings.length ? mappings.map(m => m.original) : (savedSources?.length ? savedSources : snapshot.paths).map(
           snapshotPath,
         );
+    const physical = (logical: string) => {
+      if (!mappings.length) return logical;
+      const mapping = mappings.find(m => m.original === logical);
+      if (!mapping) throw new Error("Choose an individual captured database from this snapshot.");
+      return mapping.captured;
+    };
     // Reject source links, even for repositories imported from other programs.
     await this.list(
       repo,
@@ -537,8 +576,8 @@ export class ResticEngine {
           entry.type === "symlink" &&
           selected.some(
             (p) =>
-              String(entry.path) === p ||
-              String(entry.path).startsWith(p + "/"),
+              String(entry.path) === physical(p) ||
+              String(entry.path).startsWith(physical(p) + "/"),
           )
         )
           throw new Error(
@@ -571,7 +610,7 @@ export class ResticEngine {
         repo,
         [
           "restore",
-          `${snapshot.id}:${parent}`,
+          `${snapshot.id}:${path.posix.dirname(physical(root))}`,
           "--target",
           subtarget,
           "--include",

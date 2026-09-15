@@ -1,5 +1,15 @@
 # Validation evidence
 
+## Shell and Settings decluttering · 2026-09-15
+
+Implemented the annotated screenshot's continuous sidebar/titlebar, 12px workspace corner, centered Settings column, and removal of generic page descriptions, sidebar status text and footer copy. Pause/resume now lives in General; About Sentry retains engine details and backup/background limitations. Concurrent logo and control updates in the shared checkout were preserved.
+
+Final hidden Electron evidence: `outputs/declutter/1789454353595/results.json` and adjacent PNGs. Captured General at 2048×1118 logical pixels (the requested 1117px height rounds at host scaling), 1180×780, 820×600 and 590×390 CSS pixels at 200% zoom, dark/light themes, paused state, empty Destinations, expanded About, Quit confirmation and empty Overview. Inspected desktop, compact, light/dark, confirmation and full native 200% captures. Settings heading, tabs and fields align; the shell corner and continuous rail match the reference. Compact content scrolls without horizontal document overflow. The 200% image uses native `capturePage` because Playwright's zoomed capture cropped the surface.
+
+The real renderer/preload/worker path confirmed pause and resume persistence in an isolated profile. ArrowRight/Home changed Settings tabs correctly; Quit opened its warning dialog and Escape dismissed it. No renderer errors; test window visibility remained false. No existing user process or backup repository was modified.
+
+Typecheck, lint, production build and `git diff --check` passed. `bun test`: 15 passed, 0 failed, 84 assertions, including real encrypted backup/restore and failure recovery. UI source audit: zero errors; its one existing search-field outline warning has a visible `.search-box:focus-within` replacement. Final controls use the concurrently updated shared primitives. Physical titlebar interaction, screen readers, and installed-package behavior were not retested for this presentation change.
+
 Windows 11 x64 build 26200; Bun 1.3.6; host Node 25.2.1. Electron 40.10.6 embeds Node 24.15.0, Chromium 144.0.7559.236 and SQLite 3.51.3. Engines: restic 0.19.1 and rclone 1.75.1. Fixtures use isolated directories and never existing backup repositories.
 
 ## Data safety
@@ -52,3 +62,14 @@ Performance measurements and their process-tree boundaries are maintained separa
 Used the supplied logo unchanged as `public/sentry-mark.png` for the title-bar brand, loading state and welcome state. Moved the Sentry brand to the top-left title-bar area above sidebar navigation. The existing working-tree removal of the File protection subtitle is preserved.
 
 Validation: `bun run typecheck`, `bun run lint`, `bun test` (15 passed, 84 assertions), and `bun run build` passed. A hidden/offscreen Electron smoke check confirmed the brand text is Sentry, both rendered logo assets load, and the window stays hidden. Screenshot inspected: `outputs/branding/overview.png`; readback: `outputs/branding/results.json`. No installer or release was produced for this change.
+`nBrand placement follow-up: lowered the title-bar brand by 10 CSS pixels after user feedback. Production build and hidden Electron branding smoke check passed; refreshed outputs/branding/overview.png.
+
+## Shared control polish, September 15, 2026
+
+Implemented themed Radix dropdowns across Settings, plan editing, and Restore; animated switches for boolean settings; custom selection checkboxes; consistent scrollbar, hover, press and disabled treatments. Existing theme tokens, domain values and request handlers remain the authority.
+
+Validation: typecheck, lint, production build and all 15 data-safety tests (84 assertions) passed. UI source audit: zero errors; its one warning is the existing search input outline removal, paired with the visible `.search-box:focus-within` outline.
+
+Hidden/offscreen Electron control acceptance passed in `outputs/native-qa/1789454485468/results.json`: native visibility false, no page errors, dropdown Escape returns focus, keyboard typeahead selects Dark, Space changes the battery switch and changes it back, and reduced motion yields 0s track/thumb transitions. Inspected Settings menus in light and dark at 1180×780 and dark at 820×600 (150% display scaling); compact document/body widths both equal 820. Screenshots 09, 11 and 12 show coherent controls without major visual defects. Also inspected the plan editor from `outputs/native-qa/1789454395187/02-plan-editor-dark.png`.
+
+The broader QA runs reached real backup, restore and sample recovery before their added control checks timed out: first on an incorrect hint selector, then on a typeahead focus race in the harness. Both harness issues were repaired; the affected control sequence passed independently using `outputs/controls-qa/check.ts`. The full QA script was not rerun after that focused confirmation. No screen-reader, physical-device, installer or release validation is claimed by this control pass.

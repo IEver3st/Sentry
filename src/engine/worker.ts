@@ -60,6 +60,11 @@ process.on("message", async (raw: unknown) => {
     try {
       if (!service)
         throw new Error("Backup worker is starting. Try again shortly.");
+      if ((message.request as { type?: string })?.type === "prepare-update") {
+        await service.prepareUpdate();
+        process.send?.({ kind: "response", id: message.id, value: true });
+        return;
+      }
       const value = await service.request(message.request);
       process.send?.({ kind: "response", id: message.id, value });
     } catch (error) {

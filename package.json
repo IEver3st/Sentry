@@ -25,6 +25,7 @@
     "@radix-ui/react-slot": "^1.2.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "electron-updater": "^6.8.9",
     "lucide-react": "^0.468.0",
     "picomatch": "^4.0.7",
     "react": "^19.1.1",
@@ -86,7 +87,15 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "IEver3st",
+        "repo": "Sentry",
+        "releaseType": "release"
+      }
+    ]
   },
   "type": "module"
 }

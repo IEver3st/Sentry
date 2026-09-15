@@ -39,6 +39,10 @@ export const planSchema = z.object({
   }),
   priority: z.number().int().min(0).max(10).default(5),
   pruningSuspended: z.boolean().default(false),
+  capture: z.enum(["files", "vss", "sqlite"]).optional(),
+  replicateFrom: id.optional(),
+  backupOnConnect: z.boolean().optional(),
+  recoveryDrillDays: z.number().int().min(0).max(90).optional(),
 });
 export type Plan = z.infer<typeof planSchema>;
 export type Schedule = z.infer<typeof scheduleSchema>;
@@ -70,6 +74,7 @@ export const weatherSchema = z.object({
 });
 export const settingsSchema = z.object({
   theme: z.enum(["dark", "light", "system"]),
+  uiScale: z.number().int().min(80).max(200).default(100),
   startAtLogin: z.boolean(),
   pauseOnBattery: z.boolean(),
   idleOnly: z.boolean(),
@@ -77,10 +82,12 @@ export const settingsSchema = z.object({
   bandwidthKiB: z.number().int().min(0).max(1048576),
   paused: z.boolean(),
   weather: weatherSchema,
+  discoveryRoots: z.array(path).max(16).optional(),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 export const defaults: Settings = {
   theme: "dark",
+  uiScale: 100,
   startAtLogin: false,
   pauseOnBattery: true,
   idleOnly: false,
@@ -108,7 +115,7 @@ export interface Job {
   planName: string;
   destinationId: string;
   destinationName: string;
-  kind: "backup" | "restore" | "check" | "prune" | "test-recovery";
+  kind: "backup" | "restore" | "check" | "prune" | "test-recovery" | "copy";
   trigger: string;
   status:
     | "queued"
@@ -134,6 +141,10 @@ export interface Job {
   name?: string;
   pin?: boolean;
   retryOf?: string;
+  checkpointUntil?: string;
+  recoveredFiles?: number;
+  recoveryBytes?: number;
+  sourceDestinationId?: string;
 }
 export interface Snapshot {
   id: string;
@@ -147,13 +158,23 @@ export interface Snapshot {
   incomplete: boolean;
   files?: number;
   bytes?: number;
+  checkpointUntil?: string;
+  capture?: string;
 }
 export interface FileEntry {
   path: string;
   type: string;
   size: number;
   mtime?: string;
+  contentId?: string;
 }
+export interface FileVersion { snapshot: Snapshot; file?: FileEntry }
+export interface SnapshotChange { path: string; change: "added" | "changed" | "deleted"; before?: FileEntry; after?: FileEntry }
+export interface FilePreview { kind: "text" | "image" | "unavailable"; content: string; reason?: string }
+export interface ProtectionGap { id: string; title: string; detail: string; path?: string; planId?: string; severity: "attention" | "info" }
+export interface GapScan { checkedAt: string; gaps: ProtectionGap[]; truncated: boolean }
+export interface RecoveryDrill { planId: string; destinationId: string; checkedAt: string; snapshotId: string; files: number; bytes: number; totalFiles: number }
+export interface BackgroundStatus { mode: "desktop" | "service"; installed: boolean; detail: string }
 export interface Preview {
   included: number;
   excluded: number;
@@ -193,8 +214,18 @@ export interface State {
   busy: boolean;
   googleConfigured: boolean;
   googleConnected: boolean;
-  update: { status: string; version?: string; url?: string };
+  update: UpdateState;
   policy?: string;
+  recoveryDrills?: RecoveryDrill[];
+  gaps?: GapScan;
+  historyPath?: string;
+  background?: BackgroundStatus;
+}
+export interface UpdateState {
+  status: "idle" | "unavailable" | "checking" | "current" | "downloading" | "ready" | "installing" | "error";
+  version?: string;
+  progress?: number;
+  message?: string;
 }
 export const requestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("state") }),
@@ -234,8 +265,18 @@ export const requestSchema = z.discriminatedUnion("type", [
     name: z.string().max(120).optional(),
     pin: z.boolean().optional(),
     destinationId: id.optional(),
+    checkpointDays: z.number().int().min(1).max(365).optional(),
   }),
   z.object({ type: z.literal("cancel"), id }),
+  z.object({ type: z.literal("file-history"), destinationId: id, path, offset: z.number().int().min(0), limit: z.number().int().min(1).max(20) }),
+  z.object({ type: z.literal("file-preview"), destinationId: id, snapshotId: id, path }),
+  z.object({ type: z.literal("snapshot-diff"), destinationId: id, before: id, after: id, offset: z.number().int().min(0), limit: z.number().int().min(1).max(200) }),
+  z.object({ type: z.literal("copy-snapshot"), sourceDestinationId: id, destinationId: id, snapshotId: id }),
+  z.object({ type: z.literal("scan-gaps") }),
+  z.object({ type: z.literal("recovery-kit") }),
+  z.object({ type: z.literal("practice-recovery"), destinationId: id, password: z.string().min(1).max(1024), target: path }),
+  z.object({ type: z.literal("explorer-integration"), enabled: z.boolean() }),
+  z.object({ type: z.literal("background-service"), action: z.enum(["status", "export-setup"]) }),
   z.object({ type: z.literal("retry"), id }),
   z.object({
     type: z.literal("snapshots"),
@@ -298,7 +339,7 @@ export const requestSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("updates"),
-    action: z.enum(["check", "download"]),
+    action: z.enum(["check", "download", "install"]),
   }),
   z.object({
     type: z.literal("history"),
@@ -337,6 +378,15 @@ export interface ResponseMap {
   window: boolean;
   updates: State["update"];
   history: { jobs: Job[]; total: number };
+  "file-history": { versions: FileVersion[]; total: number };
+  "file-preview": FilePreview;
+  "snapshot-diff": { changes: SnapshotChange[]; total: number };
+  "copy-snapshot": string;
+  "scan-gaps": GapScan;
+  "recovery-kit": string;
+  "practice-recovery": { files: number; bytes: number; snapshotId: string; target: string };
+  "explorer-integration": boolean;
+  "background-service": BackgroundStatus;
 }
 export interface SentryBridge {
   request<T extends Request>(request: T): Promise<ResponseMap[T["type"]]>;

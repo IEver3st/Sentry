@@ -54,7 +54,6 @@ const pages: Array<{ name: Page; icon: typeof LayoutDashboard }> = [
   { name: "Backup Plans", icon: ListChecks },
   { name: "Restore", icon: ArrowDownToLine },
   { name: "Activity", icon: ActivityIcon },
-  { name: "Settings", icon: SettingsIcon },
 ];
 export function App() {
   const [state, setState] = useState<State>();
@@ -206,6 +205,7 @@ export function App() {
                 <button
                   key={name}
                   aria-label={name}
+                  title={name}
                   onClick={() => {
                     setPage(name);
                     setNotice(undefined);
@@ -219,6 +219,12 @@ export function App() {
                   )}
                 </button>
               ))}
+            </nav>
+            <nav className="sidebar-bottom" aria-label="Application">
+              <UpdateControl />
+              <button aria-label="Settings" title="Settings" aria-current={page === "Settings" ? "page" : undefined} onClick={() => { setPage("Settings"); setNotice(undefined); }}>
+                <SettingsIcon size={17} aria-hidden="true" /><span>Settings</span>
+              </button>
             </nav>
           </aside>
           <main className={`workspace${page === "Settings" ? " workspace-settings" : ""}`} id="main-content">
@@ -882,4 +888,16 @@ function ActivityPage() {
       </div>
     </>
   );
+}
+
+function UpdateControl() {
+  const { state, perform } = useApp();
+  const update = state.update;
+  const working = ["checking", "downloading", "installing"].includes(update.status);
+  const label = update.status === "ready" ? "Restart to update" : update.status === "downloading" ? `Downloading ${Math.round(update.progress ?? 0)}%` : update.status === "checking" ? "Checking for updates" : update.status === "installing" ? "Restarting…" : update.status === "error" ? "Retry update" : "Check for updates";
+  const detail = update.status === "ready" ? (state.busy ? "Waiting for backup work" : `Version ${update.version} ready`) : update.status === "current" ? "Sentry is up to date" : update.status === "unavailable" ? "Installed app only" : update.status === "idle" ? "Checks automatically" : update.status === "error" ? "Check failed · Try again" : update.version ? `Version ${update.version}` : "";
+  return <button className="sidebar-update" aria-label={label} title={update.message || `${label}${detail ? ` · ${detail}` : ""}`} disabled={working || update.status === "unavailable" || (update.status === "ready" && state.busy)} onClick={() => void perform({ type: "updates", action: update.status === "ready" ? "install" : "check" })}>
+    {update.status === "ready" ? <ArrowDownToLine size={17} aria-hidden="true" /> : <RefreshCw size={17} aria-hidden="true" />}
+    <span className="update-copy" aria-live="polite"><span>{label}</span><small>{detail}</small></span>
+  </button>;
 }

@@ -2,7 +2,7 @@ import { build } from "vite";
 import { mkdir } from "node:fs/promises";
 await mkdir("dist", { recursive: true });
 for (const [entry, external] of [
-  ["src/main/main.ts", ["electron"]],
+  ["src/main/main.ts", ["electron", "electron-updater"]],
   ["src/main/preload.ts", ["electron"]],
   ["src/engine/worker.ts", []],
 ] as const) {

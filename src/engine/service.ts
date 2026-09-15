@@ -20,6 +20,7 @@ import {
 } from "../automation/weather";
 import {
   defaults,
+  settingsSchema,
   planSchema,
   requestSchema,
   type State,
@@ -82,7 +83,7 @@ export class BackupService {
   constructor(private readonly options: ServiceOptions) {
     this.store = new Store(options.data);
     this.settings =
-      this.store.get<Settings>("settings", "app") ?? structuredClone(defaults);
+      settingsSchema.parse(this.store.get<Settings>("settings", "app") ?? structuredClone(defaults));
     this.weather = this.store.get<WeatherStatus>("weather", "status") ?? {
       alerts: 0,
     };
@@ -136,9 +137,7 @@ export class BackupService {
       busy: !!this.active || this.running || this.reserved,
       googleConfigured: this.google.configured,
       googleConnected: this.connected,
-      update: this.store.get<State["update"]>("update", "status") ?? {
-        status: "Not checked",
-      },
+      update: { status: "unavailable" },
       policy: this.policyMessage,
     };
   }
@@ -602,8 +601,6 @@ export class BackupService {
         return this.diagnostics();
       case "legacy-import":
         return this.importLegacy(request.path);
-      case "updates":
-        return this.updates(request.action);
       default:
         throw new Error("This action requires the native application.");
     }
@@ -1260,48 +1257,13 @@ export class BackupService {
     this.emit();
     return { imported, warnings };
   }
-  private async updates(action: "check" | "download") {
-    if (action === "download") {
-      if (this.active) throw new Error("Wait for active work to finish.");
-      const result = this.store.get<State["update"]>("update", "status");
-      if (!result?.url) throw new Error("No published update is available.");
-      return result;
-    }
-    const response = await fetch(
-      "https://api.github.com/repos/IEver3st/Sentry/releases/latest",
-      {
-        headers: {
-          Accept: "application/vnd.github+json",
-          "User-Agent": "Sentry",
-        },
-        signal: AbortSignal.timeout(15000),
-      },
-    );
-    let result: State["update"];
-    if (response.status === 404)
-      result = { status: "No published update available" };
-    else {
-      if (!response.ok)
-        throw new Error(`Update check failed (HTTP ${response.status}).`);
-      const release = (await response.json()) as {
-        tag_name?: string;
-        html_url?: string;
-      };
-      const url = new URL(release.html_url ?? "");
-      if (
-        url.origin !== "https://github.com" ||
-        !url.pathname.startsWith("/IEver3st/Sentry/releases/")
-      )
-        throw new Error("Update response did not identify a trusted release.");
-      result = {
-        status: "Published release available",
-        version: release.tag_name,
-        url: url.toString(),
-      };
-    }
-    this.store.put("update", "status", result);
-    this.emit();
-    return result;
+  async prepareUpdate(): Promise<void> {
+    // Drain already accepted mutations before deciding whether restart is safe.
+    await this.requests.catch(() => {});
+    const state = this.state();
+    if (state.busy || state.jobs.some(job => ["running", "queued"].includes(job.status)))
+      throw new Error("Wait for backup work to finish before restarting to update.");
+    await this.close();
   }
   close(): Promise<void> {
     if (this.closing) return this.closing;

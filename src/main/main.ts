@@ -18,6 +18,9 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { requestSchema, type State, type Request } from "../shared/contracts";
 
+import { autoUpdater } from "electron-updater";
+import { SoftwareUpdates } from "./updates";
+
 const qa = process.env.SENTRY_QA === "1";
 // This utility renders text and controls, not video or 3D. Avoid retaining a large
 // hardware GPU context after the window closes; measured in docs/performance.md.
@@ -28,6 +31,12 @@ let win: BrowserWindow | undefined;
 let tray: Tray;
 let worker: ChildProcess;
 let quitting = false;
+let installing = false;
+let updates: SoftwareUpdates;
+function publishState() {
+  if (current && win && !win.isDestroyed() && !win.isMinimized())
+    win.webContents.send("sentry:state", { ...current, update: updates.state });
+}
 let current: State | undefined;
 let secrets: Record<string, string> = {};
 const pending = new Map<
@@ -56,7 +65,7 @@ async function saveSecrets() {
     });
   return saveChain;
 }
-function call(request: Request): Promise<unknown> {
+function call(request: Request | { type: "prepare-update" }): Promise<unknown> {
   const id = randomUUID();
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject });
@@ -105,6 +114,9 @@ function show() {
       ...(qa ? { offscreen: true } : {}),
     },
   });
+  win.webContents.on("did-finish-load", () => {
+    win?.webContents.setZoomFactor((current?.settings.uiScale ?? 100) / 100);
+  });
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (event) => event.preventDefault());
   win.webContents.session.setPermissionRequestHandler(
@@ -118,7 +130,7 @@ function show() {
     worker.send?.({ kind: "visibility", visible: false }),
   );
   win.on("restore", () => {
-    if (current) win?.webContents.send("sentry:state", current);
+    if (current) publishState();
   });
   win.once("ready-to-show", () => {
     if (!qa) {
@@ -245,6 +257,7 @@ else {
             "Saved credentials could not be decrypted. Original credential file was preserved.",
           );
       }
+      updates = new SoftwareUpdates(app.isPackaged && !qa, publishState, autoUpdater);
       worker = fork(join(compiled, "worker.cjs"), [], {
         execPath: process.execPath,
         env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
@@ -252,7 +265,7 @@ else {
       });
       worker.stdout?.on("data", () => {});
       worker.stderr?.on("data", () => {});
-      worker.on("exit", () => {
+      worker.on("exit", (code) => {
         for (const p of pending.values())
           p.reject(
             new Error(
@@ -260,7 +273,9 @@ else {
             ),
           );
         pending.clear();
-        if (quitting) app.quit();
+        if (installing && code === 0) { quitting = true; updates.install(); }
+        else if (installing) { installing = false; updates.set({ status: "error", message: "Backup worker did not shut down cleanly. Restart Sentry before updating." }); }
+        else if (quitting) app.quit();
       });
       worker.on("message", async (raw: unknown) => {
         const m = raw as {
@@ -281,6 +296,8 @@ else {
         if (m.kind === "state") {
           current = m.value as State;
           if (win && !win.isDestroyed()) {
+            const scale = current.settings.uiScale / 100;
+            if (win.webContents.getZoomFactor() !== scale) win.webContents.setZoomFactor(scale);
             const dark =
               current.settings.theme === "dark" ||
               (current.settings.theme === "system" &&
@@ -291,7 +308,7 @@ else {
               height: 34,
             });
             if (!win.isMinimized())
-              win.webContents.send("sentry:state", current);
+              publishState();
           }
           updateTray();
         }
@@ -353,6 +370,19 @@ else {
           )
             throw new Error("Untrusted request.");
           const request = requestSchema.parse(raw);
+          if (installing || quitting) throw new Error("Sentry is restarting. Try again after it opens.");
+          if (request.type === "state") return { ok: true, value: { ...await call(request) as State, update: updates.state } };
+          if (request.type === "updates") {
+            if (request.action !== "install") return { ok: true, value: await updates.check() };
+            if (updates.state.status !== "ready") throw new Error("No downloaded update is ready.");
+            // The worker checks again atomically before stopping its scheduler.
+            installing = true;
+            try { await call({ type: "prepare-update" }); }
+            catch (error) { installing = false; throw error; }
+            updates.set({ ...updates.state, status: "installing" });
+            worker.send({ kind: "shutdown" });
+            return { ok: true, value: updates.state };
+          }
           if (request.type === "choose-path") {
             if (qa)
               throw new Error(
@@ -406,15 +436,6 @@ else {
             await writeFile(r.filePath, contents, "utf8");
             return { ok: true, value: r.filePath };
           }
-          if (request.type === "updates" && request.action === "download") {
-            if (current?.busy)
-              throw new Error(
-                "Wait for active jobs to finish before downloading an update.",
-              );
-            const result = (await call(request)) as State["update"];
-            if (result.url && !qa) await shell.openExternal(result.url);
-            return { ok: true, value: result };
-          }
           return { ok: true, value: await call(request) };
         } catch (e) {
           return {
@@ -431,6 +452,10 @@ else {
       powerMonitor.on("on-battery", () => void policy());
       setInterval(() => void policy(), 60_000).unref();
       void policy();
+      if (app.isPackaged && !qa) {
+        setTimeout(() => void updates.check(), 15_000).unref();
+        setInterval(() => void updates.check(), 6 * 60 * 60_000).unref();
+      }
       if (!process.argv.includes("--background")) show();
     })
     .catch((error) => {
