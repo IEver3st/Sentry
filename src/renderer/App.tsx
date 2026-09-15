@@ -4,7 +4,6 @@ import {
   ArrowDownToLine,
   ArrowRight,
   Check,
-  ChevronDown,
   ChevronRight,
   Clock3,
   Cloud,
@@ -20,6 +19,8 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Search,
+  ShieldCheck,
   Settings as SettingsIcon,
   Square,
   Trash2,
@@ -42,11 +43,18 @@ import {
   Notice,
   shortPath,
   Status,
+  Select,
   useApp,
 } from "./ui";
 import { newPlan, PlanEditor, RunDialog } from "./PlanEditor";
 import { Restore } from "./Restore";
 import { SettingsPage } from "./Settings";
+import { ProtectionGaps } from "./RecoverySettings";
+import { OverviewInsights } from "./OverviewInsights";
+import { defaultOverview } from "../shared/contracts";
+import { Onboarding } from "./onboarding/Onboarding";
+import { shouldStartOnboarding } from "./onboarding/model";
+import { PreparationList, WorkspaceIntro } from "./WorkspaceParts";
 
 type Page = "Overview" | "Backup Plans" | "Restore" | "Activity" | "Settings";
 const pages: Array<{ name: Page; icon: typeof LayoutDashboard }> = [
@@ -62,6 +70,12 @@ export function App() {
   const [notice, setNotice] = useState<{ message: string; error: boolean }>();
   const [editor, setEditor] = useState<Plan>();
   const [run, setRun] = useState<Plan>();
+  const [onboarding, setOnboarding] = useState<boolean>();
+  const [settingsEntry, setSettingsEntry] = useState<"General" | "Destinations">("General");
+  useEffect(() => {
+    if (state && onboarding === undefined) setOnboarding(shouldStartOnboarding(state));
+  }, [state, onboarding]);
+  useEffect(() => { if (state?.historyPath) setPage("Restore"); }, [state?.historyPath]);
   const refresh = useCallback(async () => {
     setState(await window.sentry.request({ type: "state" }));
   }, []);
@@ -115,6 +129,7 @@ export function App() {
       if (!document.hidden)
         void refresh().catch((cause) => setError(String(cause)));
     };
+    document.documentElement.dataset.hidden = String(document.hidden);
     document.addEventListener("visibilitychange", visibility);
     return () => {
       unsubscribe();
@@ -192,13 +207,14 @@ export function App() {
   const activeJobs = state.jobs.filter((job) =>
     ["queued", "running"].includes(job.status),
   );
+  const showOnboarding = onboarding ?? shouldStartOnboarding(state);
   return (
     <AppContext.Provider
       value={{ state, refresh, notify, perform, notice, clearNotice }}
     >
       <div className="app-shell">
         {shell}
-        <div className="app-body">
+        {showOnboarding ? <Onboarding onExit={(target) => { if (target === "Settings") setSettingsEntry("Destinations"); setOnboarding(false); setPage(target); }} /> : <div className="app-body">
           <aside className="sidebar">
             <nav aria-label="Main navigation">
               {pages.map(({ name, icon: Icon }) => (
@@ -222,12 +238,12 @@ export function App() {
             </nav>
             <nav className="sidebar-bottom" aria-label="Application">
               <UpdateControl />
-              <button aria-label="Settings" title="Settings" aria-current={page === "Settings" ? "page" : undefined} onClick={() => { setPage("Settings"); setNotice(undefined); }}>
+              <button aria-label="Settings" title="Settings" aria-current={page === "Settings" ? "page" : undefined} onClick={() => { setSettingsEntry("General"); setPage("Settings"); setNotice(undefined); }}>
                 <SettingsIcon size={17} aria-hidden="true" /><span>Settings</span>
               </button>
             </nav>
           </aside>
-          <main className={`workspace${page === "Settings" ? " workspace-settings" : ""}`} id="main-content">
+          <main className={`workspace${page === "Settings" ? " workspace-settings" : ""}${["Backup Plans", "Restore", "Activity"].includes(page) ? " operational-workspace" : ""}`} id="main-content">
             <div className="page-header">
               <div>
                 <h1>{page}</h1>
@@ -256,7 +272,7 @@ export function App() {
                 )}
               </div>
             </div>
-            <div className="page-content">
+            <div className="page-content" key={page}>
               {notice && (
                 <div className="toast-container">
                   <Notice error={notice.error}>{notice.message}</Notice>
@@ -279,6 +295,7 @@ export function App() {
               {page === "Overview" && (
                 <Overview
                   create={() => setEditor(newPlan())}
+                  setup={() => { setNotice(undefined); setOnboarding(true); }}
                   edit={setEditor}
                   run={setRun}
                   navigate={setPage}
@@ -291,12 +308,13 @@ export function App() {
                   create={() => setEditor(newPlan())}
                 />
               )}{" "}
-              {page === "Restore" && <Restore />}
-              {page === "Activity" && <ActivityPage />}
-              {page === "Settings" && <SettingsPage />}
+              {page === "Restore" && <Restore connect={() => setPage("Settings")} plans={() => setPage("Backup Plans")} />}
+              {page === "Overview" && state.plans.length > 0 && <ProtectionGaps onReview={(path, planId) => { const existing = state.plans.find(p => p.id === planId); setEditor(existing ?? { ...newPlan(), name: path?.split(/[\\/]/).pop() ?? "", sources: path ? [path] : [] }); }} />}
+              {page === "Activity" && <ActivityPage plans={() => setPage("Backup Plans")} restore={() => setPage("Restore")} />}
+              {page === "Settings" && <SettingsPage initialTab={settingsEntry} />}
             </div>
           </main>
-        </div>
+        </div>}
       </div>
       {editor && (
         <PlanEditor initial={editor} onClose={() => setEditor(undefined)} />
@@ -308,16 +326,19 @@ export function App() {
 
 function Overview({
   create,
+  setup,
   edit,
   run,
   navigate,
 }: {
   create: () => void;
+  setup: () => void;
   edit: (plan: Plan) => void;
   run: (plan: Plan) => void;
   navigate: (page: Page) => void;
 }) {
   const { state } = useApp();
+  const overviewWidgets = (state.settings.overview ?? defaultOverview).widgets;
   const enabled = state.plans.filter((plan) => plan.enabled);
   const gaps = enabled
     .flatMap((plan) =>
@@ -355,6 +376,7 @@ function Overview({
               <Plus size={16} />
               Create your first plan
             </Button>
+            <Button variant="ghost" onClick={setup}>Guided setup<ArrowRight size={15} /></Button>
           </div>
         </div>
         <div className="recover-existing">
@@ -373,10 +395,10 @@ function Overview({
   return (
     <>
       <section
-        className={`protection-summary ${gaps.length ? "has-gaps" : ""}`}
+        className={`protection-summary ${gaps.length || state.settings.paused || !enabled.length || running.length ? "has-gaps" : ""}`}
       >
         <div className="protection-mark">
-          {gaps.length ? <Clock3 size={22} /> : <Check size={22} />}
+          {gaps.length || state.settings.paused || !enabled.length || running.length ? <Clock3 size={22} /> : <Check size={22} />}
         </div>
         <div>
           <h2>
@@ -392,17 +414,17 @@ function Overview({
           </h2>
           <p>
             {state.settings.paused
-              ? "Manual backups remain available. Resume to allow automatic runs."
+              ? "Manual backups remain available. Resume automatic backups in Settings."
               : gaps.length
-                ? "Review the destinations below. A successful copy in one place does not cover a failed copy elsewhere."
+                ? "A successful copy in one place does not cover a failed copy elsewhere. Review your plans and destinations."
                 : enabled.length
                   ? `${enabled.length} enabled ${enabled.length === 1 ? "plan" : "plans"} · Check a recovery regularly to confirm your files can be restored.`
                   : "Enable a plan to protect files automatically. Existing snapshots remain available to restore."}
           </p>
         </div>
-        <Button onClick={() => navigate("Restore")}>
-          Restore files
-          <ArrowDownToLine size={15} />
+        <Button onClick={() => navigate(state.settings.paused ? "Settings" : gaps.length ? "Backup Plans" : "Restore")}>
+          {state.settings.paused ? "Open settings" : gaps.length ? "Review plans" : "Restore files"}
+          {state.settings.paused || gaps.length ? <ArrowRight size={15} /> : <ArrowDownToLine size={15} />}
         </Button>
       </section>
       {running.length > 0 && (
@@ -423,7 +445,8 @@ function Overview({
           ))}
         </section>
       )}
-      <section className="section">
+      <OverviewInsights />
+      {overviewWidgets.includes("ledger") && <section className="section">
         <div className="section-heading">
           <h2>Protection ledger</h2>
           <Button size="small" onClick={create}>
@@ -476,7 +499,7 @@ function Overview({
                     </div>
                     <div>
                       <span>{date(latest?.lastSuccess)}</span>
-                      <Status status={latest?.status || "attention"} />
+                      <Status status={destination?.status !== "ready" ? destination?.status || "unavailable" : latest?.status || "attention"} />
                     </div>
                   </div>
                 );
@@ -492,8 +515,8 @@ function Overview({
             </Button>
           </div>
         ))}
-      </section>
-      <section className="section">
+      </section>}
+      {overviewWidgets.includes("recent") && <section className="section">
         <div className="section-heading">
           <h2>Recent activity</h2>
           <Button
@@ -512,7 +535,7 @@ function Overview({
             No jobs yet. Run a plan to create its first copy.
           </p>
         )}
-      </section>
+      </section>}
     </>
   );
 }
@@ -543,22 +566,31 @@ function Plans({
 }) {
   const { state, perform } = useApp();
   const [expanded, setExpanded] = useState<string>();
-  return !state.plans.length ? (
-    <Empty
-      icon={<ListChecks size={28} />}
-      heading="No backup plans yet"
-      action={
-        <Button variant="primary" onClick={create}>
-          <Plus size={16} />
-          New plan
-        </Button>
-      }
-    >
-      A plan brings your files, destinations, and schedule together.
-    </Empty>
-  ) : (
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
+  const enabled = state.plans.filter(plan => plan.enabled).length;
+  const visible = state.plans.filter(plan =>
+    (filter === "all" || (filter === "enabled" ? plan.enabled : !plan.enabled)) &&
+    [plan.name, ...plan.sources].join(" ").toLowerCase().includes(search.toLowerCase()),
+  );
+  return <div className="plans-workspace">
+    <div className="workspace-summary"><span><strong>{state.plans.length}</strong> {state.plans.length === 1 ? "plan" : "plans"}</span><span><strong>{enabled}</strong> enabled</span><span><strong>{state.destinations.length}</strong> {state.destinations.length === 1 ? "destination" : "destinations"}</span><span className="summary-note"><Clock3 size={14} />{state.settings.paused ? "Automatic backups paused" : "Schedules follow each plan"}</span></div>
+    {!state.plans.length ? <>
+      <div className="workspace-empty-split">
+        <WorkspaceIntro icon={<FolderOpen size={29} />} eyebrow="YOUR BACKUP LIBRARY" title="Create your first backup plan." action={<Button variant="primary" onClick={create}><Plus size={15} />Create your first plan</Button>}>
+          Choose what to save, where to keep it, and when to back it up. Each destination keeps its own recovery history.
+        </WorkspaceIntro>
+        <PreparationList title="Build your first plan" items={[
+          { title: "Files & folders", detail: "Add documents, projects, or any folders you want to keep." },
+          { title: "A place for your copies", detail: state.destinations.length ? `${state.destinations.length} destinations available. Choose one or more in your plan. Each must be ready to receive a backup.` : "Connect a local drive or cloud destination while creating your plan.", ready: state.destinations.some(destination => destination.status === "ready") },
+          { title: "A schedule that fits", detail: "Run on a schedule, or keep it manual and back up when you choose." },
+        ]} />
+      </div>
+      <section className="workspace-reference"><h2>What your plan keeps track of</h2><div className="reference-columns"><div><HardDrive size={18} /><h3>Every destination</h3><p>See the latest outcome and last complete copy for each location.</p></div><div><Clock3 size={18} /><h3>Saved versions</h3><p>Set how many daily, weekly, and monthly versions to retain.</p></div><div><ShieldCheck size={18} /><h3>Checkpoints</h3><p>Name and pin a backup before a big change so it stays available.</p></div></div></section>
+    </> : <>
+    <div className="workspace-toolbar"><div className="filter-segments" role="group" aria-label="Filter plans">{[["all", "All plans"], ["enabled", "Enabled"], ["disabled", "Disabled"]].map(([value, label]) => <button key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}</div><div className="search-box"><Search size={15} /><input type="search" aria-label="Search plans" placeholder="Find a plan or source…" value={search} onChange={event => setSearch(event.target.value)} /></div></div>
     <div className="plans-list">
-      {state.plans.map((plan) => (
+      {visible.map((plan) => (
         <article className="plan-item" key={plan.id}>
           <div className="plan-heading">
             <button
@@ -568,24 +600,19 @@ function Plans({
                 setExpanded(expanded === plan.id ? undefined : plan.id)
               }
             >
-              {expanded === plan.id ? (
-                <ChevronDown size={16} />
-              ) : (
-                <ChevronRight size={16} />
-              )}
+              <ChevronRight className="disclosure-chevron" size={16} />
               <FolderOpen size={21} />
               <span>
                 <strong>{plan.name}</strong>
                 <small>
-                  {plan.sources.length} source
-                  {plan.sources.length === 1 ? "" : "s"} · {scheduleText(plan)}
+                    {plan.sources.map(shortPath).join(", ")} · {scheduleText(plan)}
                 </small>
               </span>
             </button>
             <Status status={plan.enabled ? "enabled" : "disabled"} />
             <Button size="small" onClick={() => run(plan)}>
               <Play size={14} />
-              Back up
+              Checkpoint
             </Button>
             <Button
               variant="ghost"
@@ -603,14 +630,15 @@ function Plans({
                 (item) => item.planId === plan.id && item.destinationId === id,
               );
               return (
-                <div key={id}>
+                <div className="plan-copy-row" key={id}>
                   {d?.kind === "gdrive" ? (
                     <Cloud size={15} />
                   ) : (
                     <HardDrive size={15} />
                   )}
-                  <span>{d?.name || "Missing destination"}</span>
-                  <Status status={j?.status || d?.status || "attention"} />
+                  <span className="plan-copy-name"><strong>{d?.name || "Missing destination"}</strong><small>{d?.error || d?.location || "Reconnect in Settings"}</small></span>
+                  <span className="plan-copy-date"><small>Last complete copy</small>{j?.lastSuccess ? date(j.lastSuccess) : "No complete copy yet"}</span>
+                  <Status status={d?.status !== "ready" ? d?.status || "unavailable" : j?.status || "attention"} />
                 </div>
               );
             })}
@@ -693,8 +721,11 @@ function Plans({
           )}
         </article>
       ))}
+      {!visible.length && <Empty icon={<Search size={24} />} heading="No matching plans" action={<Button onClick={() => { setSearch(""); setFilter("all"); }}>Clear filters</Button>}>Try another name or source folder.</Empty>}
     </div>
-  );
+    <p className="workspace-footnote">{visible.length} of {state.plans.length} plans · Expand a plan to review its sources, version policy, and controls.</p>
+    </>}
+  </div>;
 }
 
 export function JobRow({ job }: { job: Job }) {
@@ -708,6 +739,7 @@ export function JobRow({ job }: { job: Job }) {
           aria-expanded={expanded}
           onClick={() => setExpanded(!expanded)}
         >
+          <ChevronRight size={14} className="disclosure-chevron" />
           {job.kind === "restore" ? (
             <ArrowDownToLine size={17} />
           ) : job.kind === "backup" ? (
@@ -724,7 +756,7 @@ export function JobRow({ job }: { job: Job }) {
         </button>
         <div className="job-time">
           {date(job.finishedAt || job.startedAt || job.createdAt)}
-          <small>{bytes(job.transferred)} transferred</small>
+          <small>{job.kind === "test-recovery" && job.recoveredFiles !== undefined ? `${job.recoveredFiles} files verified · ${bytes(job.recoveryBytes ?? 0)}` : bytes(job.transferred) + " transferred"}</small>
         </div>
         <div className="job-outcome">
           <Status status={job.status} />
@@ -808,15 +840,21 @@ export function JobRow({ job }: { job: Job }) {
   );
 }
 
-function ActivityPage() {
+function ActivityPage({ plans, restore }: { plans: () => void; restore: () => void }) {
   const { state, perform, notify } = useApp();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [busy, setBusy] = useState(true);
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [kind, setKind] = useState("all");
+  const [readError, setReadError] = useState("");
+  const [reload, setReload] = useState(0);
   useEffect(() => {
     let alive = true;
     setBusy(true);
+    setReadError("");
     void window.sentry
       .request({ type: "history", offset, limit: 50 })
       .then((result) => {
@@ -826,7 +864,7 @@ function ActivityPage() {
         }
       })
       .catch((cause) => {
-        if (alive) notify(String(cause), true);
+        if (alive) setReadError(String(cause));
       })
       .finally(() => {
         if (alive) setBusy(false);
@@ -834,13 +872,19 @@ function ActivityPage() {
     return () => {
       alive = false;
     };
-  }, [offset, state.jobs, notify]);
+  }, [offset, state.jobs, reload]);
+  const ongoing = (job: Job) => ["running", "queued"].includes(job.status);
+  const incomplete = (job: Job) => ["failed", "partial", "interrupted", "cancelled"].includes(job.status);
+  const visible = jobs.filter(job =>
+    (filter === "all" || (filter === "active" ? ongoing(job) : filter === "success" ? job.status === "success" : incomplete(job))) &&
+    (kind === "all" || job.kind === kind) &&
+    [job.planName, job.destinationName, job.name, job.error].filter(Boolean).join(" ").toLowerCase().includes(search.toLowerCase()),
+  );
   return (
-    <>
-      <div className="section-heading">
-        <span className="muted">
-          {total.toLocaleString()} recorded operations
-        </span>
+    <div className="activity-workspace">
+      <div className="workspace-summary"><span><strong>{total.toLocaleString()}</strong> recorded operations</span><span><strong>{state.jobs.filter(ongoing).length}</strong> in progress</span><span className="summary-note">Each destination has its own outcome</span></div>
+      <div className="workspace-toolbar">
+        <div className="filter-segments" role="group" aria-label="Filter activity">{[["all", "All outcomes"], ["active", "In progress"], ["attention", "Incomplete"], ["success", "Successful"]].map(([value, label]) => <button key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}</div>
         <Button
           size="small"
           onClick={async () => {
@@ -853,19 +897,27 @@ function ActivityPage() {
           Export diagnostics
         </Button>
       </div>
-      {!jobs.length && !busy ? (
-        <Empty icon={<ActivityIcon size={28} />} heading="No activity yet">
-          Backups, checks, and restores will appear here with an outcome for
-          each destination.
-        </Empty>
-      ) : (
-        <div aria-busy={busy}>
-          {jobs.map((job) => (
+      {(total > 0 || busy) && <div className="activity-search-row"><div className="search-box"><Search size={15} /><input type="search" aria-label="Search current activity page" placeholder="Search plan, destination, or error…" value={search} onChange={event => setSearch(event.target.value)} /></div><Select aria-label="Operation type" value={kind} onValueChange={setKind}><option value="all">All operations</option><option value="backup">Backups</option><option value="restore">Restores</option><option value="test-recovery">Recovery tests</option><option value="check">Repository checks</option><option value="copy">Copies</option><option value="prune">Pruning</option></Select></div>}
+      {readError ? <Notice error>Activity could not be refreshed. {readError}<Button size="small" onClick={() => setReload(value => value + 1)}>Try again</Button></Notice> : null}
+      {!jobs.length && busy ? <div className="workspace-loading" role="status"><Clock3 size={22} /><div><strong>Reading operation history</strong><p>Loading outcomes from your activity log…</p></div></div> : !jobs.length && !readError ? (
+        <>
+          <div className="workspace-empty-split"><WorkspaceIntro icon={<ActivityIcon size={29} />} eyebrow="OPERATION HISTORY" title="No operations recorded yet." action={<div className="button-group"><Button variant="primary" onClick={plans}>Go to backup plans<ArrowRight size={15} /></Button><Button onClick={restore}>Recover existing files</Button></div>}>Backups, restores, and checks appear here as they run. Open an operation to inspect its files, timing, and outcome.</WorkspaceIntro><PreparationList title="Follow every operation" items={[
+            { title: "While it runs", detail: "See the current phase and progress, or cancel a queued or running job." },
+            { title: "When it finishes", detail: "Review transferred bytes, file changes, skipped files, and any errors." },
+            { title: "If it needs attention", detail: "Inspect incomplete work and retry the affected operation." },
+          ]} /></div>
+          <section className="workspace-reference"><h2>Know what an outcome means</h2><div className="reference-columns"><div><Status status="success" /><p>The operation finished successfully. Recovery tests report the files they verified.</p></div><div><Status status="partial" /><p>Some work finished, but skipped or unreadable files mean the copy is incomplete.</p></div><div><Status status="failed" /><p>The operation did not finish successfully. Open its details to find the cause.</p></div></div></section>
+        </>
+      ) : jobs.length > 0 ? (
+        <section className="activity-ledger" aria-busy={busy} aria-label="Operation history">
+          <div className="activity-ledger-heading"><h2>Operations</h2><span>{busy ? "Refreshing…" : `${visible.length} ${visible.length === 1 ? "match" : "matches"} on this page`}</span></div>
+          {visible.map((job) => (
             <JobRow key={job.id} job={job} />
           ))}
-        </div>
-      )}
-      <div className="pagination">
+          {!visible.length && <Empty icon={<Search size={24} />} heading="No matching operations" action={<Button onClick={() => { setFilter("all"); setSearch(""); setKind("all"); }}>Clear filters</Button>}>Filters apply to this page of history. Try another page or clear the filters.</Empty>}
+        </section>
+      ) : null}
+      {total > 0 && <><div className="pagination">
         <Button
           size="small"
           disabled={!offset || busy}
@@ -885,19 +937,20 @@ function ActivityPage() {
         >
           Next
         </Button>
-      </div>
-    </>
+      </div><p className="workspace-footnote">Filters apply to the current 50-operation page. Incomplete includes partial, failed, interrupted, and cancelled work.</p></>}
+    </div>
   );
 }
 
 function UpdateControl() {
   const { state, perform } = useApp();
   const update = state.update;
-  const working = ["checking", "downloading", "installing"].includes(update.status);
-  const label = update.status === "ready" ? "Restart to update" : update.status === "downloading" ? `Downloading ${Math.round(update.progress ?? 0)}%` : update.status === "checking" ? "Checking for updates" : update.status === "installing" ? "Restarting�" : update.status === "error" ? "Retry update" : "Check for updates";
-  const detail = update.status === "ready" ? (state.busy ? "Waiting for backup work" : `Version ${update.version} ready`) : update.status === "current" ? "Sentry is up to date" : update.status === "unavailable" ? "Installed app only" : update.status === "idle" ? "Checks automatically" : update.status === "error" ? "Check failed � Try again" : update.version ? `Version ${update.version}` : "";
-  return <button className="sidebar-update" aria-label={label} title={update.message || `${label}${detail ? ` � ${detail}` : ""}`} disabled={working || update.status === "unavailable" || (update.status === "ready" && state.busy)} onClick={() => void perform({ type: "updates", action: update.status === "ready" ? "install" : "check" })}>
-    {update.status === "ready" ? <ArrowDownToLine size={17} aria-hidden="true" /> : <RefreshCw size={17} aria-hidden="true" />}
+  if (!["available", "downloading", "ready", "installing"].includes(update.status) && !(update.status === "error" && update.version)) return null;
+  const working = ["downloading", "installing"].includes(update.status);
+  const label = update.status === "ready" ? "Restart to update" : update.status === "downloading" ? `Downloading ${Math.round(update.progress ?? 0)}%` : update.status === "installing" ? "Restarting…" : update.status === "error" ? "Retry download" : "Download update";
+  const detail = update.status === "ready" && state.busy ? "Waiting for backup work" : `Version ${update.version}`;
+  return <button className="sidebar-update" aria-label={label} title={update.message || `${label} · ${detail}`} disabled={working || (update.status === "ready" && state.busy)} onClick={() => void perform({ type: "updates", action: update.status === "ready" ? "install" : "download" })}>
+    {update.status === "ready" ? <RefreshCw size={17} aria-hidden="true" /> : <ArrowDownToLine size={17} aria-hidden="true" />}
     <span className="update-copy" aria-live="polite"><span>{label}</span><small>{detail}</small></span>
   </button>;
 }

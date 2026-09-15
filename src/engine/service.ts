@@ -3,7 +3,9 @@ import { readFile, mkdir, statfs, stat, readdir, rm } from "node:fs/promises";
 import { join, isAbsolute } from "node:path";
 import { Store } from "./store";
 import { ResticEngine, type Repository, type EngineEvent } from "./restic";
-import { previewSources, validateSources, containsPath } from "./paths";
+import { previewSources, validateSources, containsPath, safeSnapshotPath, snapshotPath, safeRestoreTarget } from "./paths";
+import { captureDatabases } from "./capture";
+import { previewFile, compareSnapshots, recoveryKit, scanGaps } from "./recovery";
 import {
   inspectVolume,
   relocateVolume,
@@ -33,6 +35,8 @@ import {
   type FileEntry,
   type WeatherStatus,
   type Protection,
+  type RecoveryDrill,
+  type FileVersion,
 } from "../shared/contracts";
 
 export interface Host {
@@ -53,6 +57,10 @@ type JobPayload = {
   request?: Request;
   attempt?: number;
   notBefore?: number;
+  sourceJobId?: string;
+  sourceDestinationId?: string;
+  snapshotId?: string;
+  copyResolved?: boolean;
 };
 const now = () => new Date().toISOString();
 function number(v: unknown): number {
@@ -80,6 +88,7 @@ export class BackupService {
   private reserved = false;
   private readonly credentialsAbort = new AbortController();
   private closing?: Promise<void>;
+  private connectionScan = false;
   constructor(private readonly options: ServiceOptions) {
     this.store = new Store(options.data);
     this.settings =
@@ -139,6 +148,8 @@ export class BackupService {
       googleConnected: this.connected,
       update: { status: "unavailable" },
       policy: this.policyMessage,
+      recoveryDrills: this.store.all<RecoveryDrill>("drill"),
+      gaps: this.store.get("gaps", "latest"),
     };
   }
   private liveJobs(jobs: Job[]): Job[] {
@@ -225,11 +236,13 @@ export class BackupService {
     if (this.closed)
       return Promise.reject(new Error("Sentry is shutting down."));
     const parsed = requestSchema.parse(raw);
-    if (["state", "cancel", "history"].includes(parsed.type))
+    if (["state", "cancel", "history", "diagnostics-snapshot", "diagnostics"].includes(parsed.type))
       return this.dispatch(parsed);
     const work = this.requests
       .catch(() => {})
       .then(async () => {
+        while (this.connectionScan && !this.closed) await new Promise(resolve => setTimeout(resolve, 25));
+        if (this.closed) throw new Error("Sentry is shutting down.");
         this.reserved = true;
         try {
           return await this.dispatch(parsed);
@@ -254,6 +267,10 @@ export class BackupService {
         }
       case "save-plan": {
         const p = request.plan;
+        if (p.replicateFrom && (!p.destinationIds.includes(p.replicateFrom) || this.destination(p.replicateFrom).kind !== "local"))
+          throw new Error("Choose a local destination in this plan as its capture repository.");
+        if (p.capture === "sqlite" && (p.includes.length || p.excludes.length))
+          throw new Error("SQLite capture protects the selected database files in full. Remove include and exclude rules.");
         for (const id of p.destinationIds) {
           const d = this.destination(id);
           await validateSources(
@@ -436,10 +453,81 @@ export class BackupService {
         void this.pump();
         return ids;
       }
+      case "file-history": {
+        this.ensureIdle();
+        const d = this.destination(request.destinationId);
+        const logical = isAbsolute(request.path) && !request.path.startsWith("/") ? snapshotPath(request.path) : safeSnapshotPath(request.path);
+        const snapshots = await this.refreshSnapshots(d, await this.repo(d));
+        const relevant = snapshots.filter(s => s.paths.some(p => logical.toLowerCase() === snapshotPath(p).toLowerCase() || logical.toLowerCase().startsWith(snapshotPath(p).toLowerCase() + "/")));
+        const versions: FileVersion[] = [];
+        for (const snapshot of relevant.slice(request.offset, request.offset + request.limit)) {
+          await this.index(d, snapshot.id);
+          const row = this.store.db.prepare("SELECT path,type,size,mtime FROM files WHERE destination=? AND snapshot=? AND path=? COLLATE NOCASE").get(d.id, snapshot.id, logical);
+          versions.push({ snapshot, file: row as unknown as FileEntry | undefined });
+        }
+        return { versions, total: relevant.length };
+      }
+      case "file-preview": {
+        this.ensureIdle();
+        const d = this.destination(request.destinationId);
+        await this.index(d, request.snapshotId);
+        const file = this.store.db.prepare("SELECT path,type,size,mtime FROM files WHERE destination=? AND snapshot=? AND path=?").get(d.id, request.snapshotId, safeSnapshotPath(request.path));
+        if (!file) throw new Error("This file is not in the selected snapshot.");
+        return previewFile(this.engine, await this.repo(d), request.snapshotId, file as unknown as FileEntry, this.options.data, this.credentialsAbort.signal);
+      }
+      case "snapshot-diff": {
+        this.ensureIdle();
+        const d = this.destination(request.destinationId);
+        return compareSnapshots(this.store, this.engine, await this.repo(d), d.id, request.before, request.after, request.offset, request.limit, this.credentialsAbort.signal);
+      }
+      case "copy-snapshot": {
+        this.ensureIdle();
+        if (request.sourceDestinationId === request.destinationId) throw new Error("Choose a different destination.");
+        const source = this.destination(request.sourceDestinationId);
+        if (source.kind !== "local") throw new Error("Choose a local repository as the source of a snapshot copy.");
+        const snapshot = (await this.refreshSnapshots(source, await this.repo(source))).find(s => s.id === request.snapshotId);
+        if (!snapshot || snapshot.incomplete) throw new Error("Choose a complete snapshot to copy.");
+        const target = this.destination(request.destinationId);
+        const job = this.newJob("copy", target, "manual", this.store.get<Plan>("plan", snapshot.planId));
+        job.sourceDestinationId = source.id;
+        this.store.enqueue(job, { request, sourceDestinationId: source.id, snapshotId: snapshot.id });
+        this.emit();
+        return job.id;
+      }
+      case "scan-gaps": {
+        this.ensureIdle();
+        const gaps = await scanGaps(this.store.all<Plan>("plan"), this.store.all<Destination>("destination"), this.store.all<Protection>("protection"), this.settings.discoveryRoots ?? [], this.credentialsAbort.signal);
+        this.store.put("gaps", "latest", gaps);
+        this.emit();
+        return gaps;
+      }
+      case "recovery-kit": return recoveryKit(this.state());
+      case "practice-recovery": {
+        this.ensureIdle();
+        this.validateRestoreTarget(request.target);
+        await safeRestoreTarget(request.target);
+        if ((await readdir(request.target)).length) throw new Error("Choose an empty folder for the recovery practice.");
+        const repo = await this.repo(this.destination(request.destinationId), false, request.password);
+        if (await this.engine.identity(repo, this.credentialsAbort.signal) !== this.destination(request.destinationId).repositoryId) throw new Error("Repository identity does not match.");
+        const snapshots = (await this.engine.snapshots(repo, this.credentialsAbort.signal)).filter(s => !s.tags?.includes("sentry:incomplete")).sort((a,b) => b.time.localeCompare(a.time));
+        if (!snapshots.length) throw new Error("No complete snapshot is available for practice.");
+        const snapshot = snapshots[0];
+        const mappings = this.engine.mappings(snapshot);
+        let sample: { path: string; size: number } | undefined;
+        await this.engine.list(repo, snapshot.id, entry => {
+          if (entry.type === "file" && (!sample || (number(entry.size) > 0 && (sample.size === 0 || number(entry.size) < sample.size)))) sample = { path: String(entry.path), size: number(entry.size) };
+        }, this.credentialsAbort.signal);
+        if (!sample) throw new Error("No ordinary files are available for practice.");
+        const picked = sample as { path: string; size: number };
+        const logical = mappings.find(m => m.captured === picked.path)?.original ?? picked.path;
+        const result = await this.engine.restore(repo, { snapshotId: snapshot.id, target: request.target, paths: [logical], overwrite: "never" }, undefined, this.credentialsAbort.signal);
+        if (result.code !== 0) throw new Error("Practice recovery was incomplete. Recovered files remain in the selected folder.");
+        return { files: 1, bytes: picked.size, snapshotId: snapshot.id, target: request.target };
+      }
       case "cancel": {
         const job = this.store.getJob(request.id);
         if (this.active?.job.id === job.id) this.active.abort.abort();
-        else if (job.status === "queued") {
+        else if (job.status === "queued" || (job.kind === "copy" && ["failed", "interrupted", "partial"].includes(job.status))) {
           job.status = "cancelled";
           job.finishedAt = now();
           this.store.job(job);
@@ -499,6 +587,7 @@ export class BackupService {
       }
       case "restore": {
         const d = this.destination(request.destinationId);
+        this.validateRestoreTarget(request.target);
         for (const p of this.store.all<Plan>("plan"))
           if (
             p.sources.some(
@@ -537,6 +626,7 @@ export class BackupService {
         this.ensureIdle();
         const d = this.destination(request.destinationId);
         const repo = await this.repo(d);
+        if (this.copyNeedsSnapshot(d.id, request.snapshotId)) throw new Error("Wait for pending copies of this snapshot before changing its pin.");
         await this.engine.pin(
           repo,
           request.snapshotId,
@@ -597,6 +687,14 @@ export class BackupService {
         return true;
       case "google-quota":
         return this.google.quota();
+      case "diagnostics-snapshot": {
+        const state = this.state();
+        return {
+          process: { pid: process.pid, name: "Backup worker", cpu: null, memory: process.memoryUsage().rss },
+          cpuUsage: process.cpuUsage(),
+          engine: { version: state.engineVersion, busy: state.busy, paused: state.settings.paused, jobs: this.store.jobs(0, 1).total, queued: Number(this.store.db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE status='queued'").get()!.n), destinations: state.destinations.length, unavailable: state.destinations.filter((d) => d.status !== "ready").length, googleConnected: state.googleConnected, weatherLastCheck: state.weather.lastCheck, weatherError: !!state.weather.error },
+        };
+      }
       case "diagnostics":
         return this.diagnostics();
       case "legacy-import":
@@ -605,12 +703,48 @@ export class BackupService {
         throw new Error("This action requires the native application.");
     }
   }
+  private validateRestoreTarget(target: string) {
+    const protectedPaths = [this.options.data, ...this.store.all<Plan>("plan").flatMap(p => p.sources), ...this.store.all<Destination>("destination").filter(d => d.kind === "local").map(d => d.location)];
+    if (protectedPaths.some(p => containsPath(p, target) || containsPath(target, p)))
+      throw new Error("Choose a restore folder separate from sources, repositories and Sentry's application data.");
+  }
+  private copyNeedsSnapshot(destinationId: string, snapshotId?: string): boolean {
+    const rows = this.store.db.prepare("SELECT data FROM jobs WHERE status IN ('queued','running','failed','interrupted','partial')").all();
+    return rows.some(row => {
+      const job = JSON.parse(String(row.data)) as Job;
+      if (job.kind !== "copy") return false;
+      const payload = this.store.get<JobPayload>("payload", job.id);
+      if (payload?.sourceDestinationId !== destinationId || payload.copyResolved) return false;
+      const id = payload.snapshotId ?? (payload.sourceJobId ? this.store.getJob(payload.sourceJobId).snapshotId : undefined);
+      return !snapshotId || id === snapshotId;
+    });
+  }
   private enqueuePlan(
     plan: Plan,
     trigger: string,
-    options: { name?: string; pin?: boolean; destinationId?: string } = {},
+    options: { name?: string; pin?: boolean; destinationId?: string; checkpointDays?: number } = {},
   ): string[] {
     const ids: string[] = [];
+    if (plan.replicateFrom && (!options.destinationId || options.destinationId !== plan.replicateFrom)) {
+      // The cloud jobs depend on this particular capture, never on a later scan.
+      if (this.store.queued().some(j => j.planId === plan.id && (j.kind === "backup" || j.kind === "copy")) || this.active?.job.planId === plan.id) return [];
+      const source = this.destination(plan.replicateFrom);
+      const capture = this.newJob("backup", source, trigger, plan);
+      capture.name = options.name;
+      capture.pin = options.pin;
+      capture.checkpointUntil = options.checkpointDays ? new Date(Date.now() + options.checkpointDays * 86400_000).toISOString() : undefined;
+      this.store.enqueue(capture, { plan, attempt: 0 });
+      ids.push(capture.id);
+      for (const id of plan.destinationIds.filter(id => id !== source.id && (!options.destinationId || id === options.destinationId))) {
+        const copy = this.newJob("copy", this.destination(id), trigger, plan);
+        copy.sourceDestinationId = source.id;
+        copy.name = options.name;
+        this.store.enqueue(copy, { plan, sourceDestinationId: source.id, sourceJobId: capture.id, attempt: 0 });
+        ids.push(copy.id);
+      }
+      this.emit();
+      return ids;
+    }
     for (const id of [...plan.destinationIds].sort((a, b) =>
       trigger === "weather"
         ? Number(this.destination(b).kind === "gdrive") -
@@ -630,6 +764,7 @@ export class BackupService {
       const job = this.newJob("backup", d, trigger, plan);
       job.name = options.name;
       job.pin = options.pin;
+      job.checkpointUntil = options.checkpointDays ? new Date(Date.now() + options.checkpointDays * 86400_000).toISOString() : undefined;
       this.store.enqueue(job, { plan, attempt: 0 } satisfies JobPayload);
       ids.push(job.id);
     }
@@ -695,14 +830,17 @@ export class BackupService {
           decode(tag("sentry:plan-name:")) ??
           "Recovered snapshot",
         time: s.time,
-        paths: s.paths,
+        paths: this.engine.mappings(s).length ? this.engine.mappings(s).map(m => m.original) : s.paths,
         name: decode(tag("sentry:name:")),
         pinned: tags.includes("sentry:pinned"),
         incomplete: tags.includes("sentry:incomplete"),
         files: number(s.summary?.total_files_processed),
         bytes: number(s.summary?.total_bytes_processed),
+        checkpointUntil: tag("sentry:checkpoint:"),
+        capture: tag("sentry:capture:"),
       } satisfies Snapshot;
     });
+    snapshots.sort((a, b) => b.time.localeCompare(a.time));
     this.store.setSnapshots(d.id, snapshots);
     return snapshots;
   }
@@ -710,9 +848,15 @@ export class BackupService {
     if (this.store.hasIndex(d.id, snapshotId)) return;
     this.store.resetIndex(d.id, snapshotId);
     let batch: FileEntry[] = [];
-    await this.engine.list(await this.repo(d), snapshotId, (event) => {
+    const repo = await this.repo(d);
+    const snapshot = (await this.engine.snapshots(repo, this.credentialsAbort.signal)).find(s => s.id === snapshotId);
+    if (!snapshot) throw new Error("Snapshot could not be found.");
+    const mappings = this.engine.mappings(snapshot);
+    await this.engine.list(repo, snapshotId, (event) => {
+      const mapped = mappings.find(m => m.captured === String(event.path));
+      if (mappings.length && !mapped) return;
       batch.push({
-        path: String(event.path),
+        path: mapped?.original ?? String(event.path),
         type: String(event.type),
         size: number(event.size),
         mtime: typeof event.mtime === "string" ? event.mtime : undefined,
@@ -721,12 +865,17 @@ export class BackupService {
         this.store.addFiles(d.id, snapshotId, batch);
         batch = [];
       }
-    });
+    }, this.credentialsAbort.signal);
     if (batch.length) this.store.addFiles(d.id, snapshotId, batch);
     this.store.finishIndex(d.id, snapshotId);
   }
   private blocked(job: Job): string | undefined {
     if (this.settings.paused) return "Protection is paused.";
+    const payload = this.store.get<JobPayload>("payload", job.id);
+    if (job.kind === "copy" && payload?.sourceJobId) {
+      const source = this.store.getJob(payload.sourceJobId);
+      if (["queued", "running"].includes(source.status)) return "Waiting for the local snapshot.";
+    }
     if (job.trigger === "manual") return undefined;
     if (this.settings.pauseOnBattery && this.power.battery)
       return "Waiting for AC power.";
@@ -800,7 +949,7 @@ export class BackupService {
               ? "Needs attention"
               : job.status;
         this.store.job(job);
-        if (job.kind === "backup" && job.planId) {
+        if ((job.kind === "backup" || job.kind === "copy") && job.planId) {
           const key = job.planId + ":" + job.destinationId;
           const protection: Protection = this.store.get<Protection>(
             "protection",
@@ -810,14 +959,14 @@ export class BackupService {
           protection.status = job.status;
           protection.error = job.error;
           if (String(job.status) === "success")
-            protection.lastSuccess = job.finishedAt;
+            protection.lastSuccess = this.store.snapshots(job.destinationId).find(s => s.id === job.snapshotId)?.time ?? job.finishedAt;
           this.store.put("protection", key, protection);
         }
         this.active = undefined;
         this.emit();
         if (
           String(job.status) === "success" &&
-          job.kind === "backup" &&
+          (job.kind === "backup" || job.kind === "copy") &&
           job.planId
         ) {
           const p = this.plan(job.planId);
@@ -849,7 +998,7 @@ export class BackupService {
         if (
           job.status === "failed" &&
           job.trigger !== "manual" &&
-          job.kind === "backup" &&
+          (job.kind === "backup" || job.kind === "copy") &&
           (payload.attempt ?? 0) < 2
         ) {
           const retry = {
@@ -904,20 +1053,26 @@ export class BackupService {
         .snapshots(d.id)
         .filter((s) => s.planId === p.id && !s.incomplete)
         .sort((a, b) => b.time.localeCompare(a.time))[0];
-      const result = await this.engine.backup(
+      const captured = p.capture === "sqlite" ? await captureDatabases(p, this.options.data, signal) : undefined;
+      let result;
+      try { result = await this.engine.backup(
         repo,
         {
-          sources: p.sources,
+          sources: captured?.sources ?? p.sources,
           includes: p.includes,
           excludes: p.excludes,
           planId: p.id,
           planName: p.name,
           name: job.name,
           pin: job.pin,
+          checkpointUntil: job.checkpointUntil,
+          vss: p.capture === "vss",
+          capture: p.capture ?? "files",
+          sourceMap: captured?.mappings,
         },
         progress,
         signal,
-      );
+      ); } finally { await captured?.cleanup(); }
       job.bytes = number(result.summary.total_bytes_processed);
       job.transferred = number(
         result.summary.data_added_packed ?? result.summary.data_added,
@@ -978,7 +1133,32 @@ export class BackupService {
         d.error = job.error;
         job.progress = 1;
       }
+    } else if (job.kind === "copy") {
+      const source = this.destination(payload.sourceDestinationId ?? "");
+      const sourceJob = payload.sourceJobId ? this.store.getJob(payload.sourceJobId) : undefined;
+      const snapshotId = payload.snapshotId ?? sourceJob?.snapshotId;
+      if (sourceJob && sourceJob.status !== "success") throw new Error("The local capture did not complete. Retry the local capture or start this plan again; no cloud protection was recorded.");
+      if (!snapshotId) throw new Error("The source snapshot is unavailable.");
+      job.phase = "Copying captured snapshot";
+      this.emit();
+      job.snapshotId = await this.engine.copy(await this.repo(source), repo, snapshotId, signal);
+      const copies = await this.refreshSnapshots(d, repo);
+      const copy = copies.find(s => s.id === job.snapshotId);
+      job.bytes = copy?.bytes ?? 0;
+      d.lastSuccess = copy?.time;
+      d.lastVerified = now();
+      d.verification = "Copied snapshot committed; repository structure verified";
+      d.status = "ready";
+      d.error = undefined;
+      let previous = job.retryOf;
+      while (previous) {
+        const old = this.store.get<JobPayload>("payload", previous);
+        if (old) this.store.put("payload", previous, { ...old, copyResolved: true });
+        previous = this.store.getJob(previous).retryOf;
+      }
+      job.progress = 1;
     } else if (request?.type === "restore") {
+      this.validateRestoreTarget(request.target);
       const result = await this.engine.restore(
         repo,
         {
@@ -1008,6 +1188,7 @@ export class BackupService {
       d.error = undefined;
     } else if (request?.type === "retention") {
       const p = this.plan(request.planId);
+      if (this.copyNeedsSnapshot(d.id)) throw new Error("Pruning is deferred while snapshots from this repository still need to be copied. Retry or cancel the pending copy first.");
       if (p.pruningSuspended)
         throw new Error(
           "Pruning is suspended. Review this plan before continuing.",
@@ -1020,37 +1201,47 @@ export class BackupService {
       await this.refreshSnapshots(d, repo);
     } else if (request?.type === "test-recovery") {
       await this.index(d, request.snapshotId);
-      const sample = this.store.db
-        .prepare(
-          "SELECT path FROM files WHERE destination=? AND snapshot=? AND type='file' ORDER BY CASE WHEN size=0 THEN 1 ELSE 0 END,size ASC LIMIT 1",
-        )
-        .get(d.id, request.snapshotId);
-      if (!sample)
-        throw new Error("This snapshot has no ordinary file to test.");
+      const snapshot = this.store.snapshots(d.id).find(s => s.id === request.snapshotId);
+      const key = (snapshot?.planId ?? "imported") + ":" + d.id;
+      const total = Number(this.store.db.prepare("SELECT COUNT(*) n FROM files WHERE destination=? AND snapshot=? AND type='file'").get(d.id, request.snapshotId)!.n);
+      const eligible = Number(this.store.db.prepare("SELECT COUNT(*) n FROM files WHERE destination=? AND snapshot=? AND type='file' AND size<=134217728").get(d.id, request.snapshotId)!.n);
+      if (!eligible) throw new Error("No ordinary files under the 128 MiB per-file drill limit are available. Use full data verification for this repository.");
+      const cursor = this.store.get<number>("drill-cursor", key) ?? 0;
+      const samples: Array<{ path: string; size: number }> = [];
+      let budget = 256 * 1024 * 1024;
+      for (let i = 0; i < Math.min(12, eligible); i++) {
+        const row = this.store.db.prepare("SELECT path,size FROM files WHERE destination=? AND snapshot=? AND type='file' AND size<=134217728 ORDER BY size,path LIMIT 1 OFFSET ?").get(d.id, request.snapshotId, (cursor + Math.floor(i * eligible / Math.min(12, eligible))) % eligible)!;
+        if (Number(row.size) <= budget) { samples.push({ path: String(row.path), size: Number(row.size) }); budget -= Number(row.size); }
+      }
       const target = join(this.options.data, "test-recovery", job.id);
-      const recovered = await this.engine.restore(
+      const sampleRoot = join(this.options.data, "test-recovery");
+      if (!containsPath(sampleRoot, target) || target === sampleRoot) throw new Error("Unsafe recovery sample cleanup path.");
+      try { const recovered = await this.engine.restore(
         repo,
         {
           snapshotId: request.snapshotId,
           target,
-          paths: [String(sample.path)],
+          paths: samples.map(s => s.path),
           overwrite: "never",
         },
         undefined,
         signal,
       );
-      d.lastVerified = now();
       if (recovered.code !== 0)
         throw new Error(
           recovered.warnings.join("\n") ||
             "The recovery sample could not be fully verified.",
         );
-      const sampleRoot = join(this.options.data, "test-recovery");
-      if (!containsPath(sampleRoot, target) || target === sampleRoot)
-        throw new Error("Unsafe recovery sample cleanup path.");
-      await rm(target, { recursive: true, force: true });
-      d.verification = "Sample restored and contents verified";
+      d.lastVerified = now();
+      d.verification = `${samples.length} of ${total} files restored and verified`;
+      job.recoveredFiles = samples.length;
+      job.recoveryBytes = samples.reduce((sum, s) => sum + s.size, 0);
       job.snapshotId = request.snapshotId;
+      this.store.put("drill", key, { planId: snapshot?.planId ?? "imported", destinationId: d.id, checkedAt: now(), snapshotId: request.snapshotId, files: samples.length, bytes: job.recoveryBytes, totalFiles: total } satisfies RecoveryDrill);
+      this.store.put("drill-cursor", key, (cursor + 1) % eligible);
+      } finally {
+      await rm(target, { recursive: true, force: true });
+      }
     } else throw new Error("Operation details are missing.");
     this.store.put("destination", d.id, d);
   }
@@ -1138,6 +1329,22 @@ export class BackupService {
         this.store.put("due", plan.id, due);
       }
       this.store.put("settings", "zone", zone);
+      for (const plan of this.store.all<Plan>("plan")) {
+        if (!plan.enabled || !plan.recoveryDrillDays || this.settings.paused) continue;
+        for (const id of plan.destinationIds) {
+          const key = plan.id + ":" + id;
+          const last = this.store.get<RecoveryDrill>("drill", key);
+          const attempt = this.store.get<string>("drill-attempt", key);
+          if (last && Date.now() - Date.parse(last.checkedAt) < plan.recoveryDrillDays * 86400_000) continue;
+          if (attempt && Date.now() - Date.parse(attempt) < 86400_000) continue;
+          if (this.store.queued().some(j => j.kind === "test-recovery" && j.destinationId === id) || this.active?.job.destinationId === id) continue;
+          const snapshot = this.store.snapshots(id).find(s => s.planId === plan.id && !s.incomplete);
+          if (!snapshot) continue;
+          const job = this.newJob("test-recovery", this.destination(id), "recovery drill", plan);
+          this.store.enqueue(job, { request: { type: "test-recovery", destinationId: id, snapshotId: snapshot.id } });
+          this.store.put("drill-attempt", key, now());
+        }
+      }
       this.store.db.exec("COMMIT");
     } catch (e) {
       this.store.db.exec("ROLLBACK");
@@ -1149,9 +1356,43 @@ export class BackupService {
         Date.now() - Date.parse(this.weather.lastCheck) >= 15 * 60_000)
     )
       void this.weatherCheck(false);
+    void this.checkConnections();
     void this.pump();
     this.timer = setTimeout(() => void this.tick(), 60_000);
     this.timer.unref();
+  }
+  async checkConnections() {
+    if (this.closed || this.connectionScan || this.running || this.reserved || this.settings.paused) return;
+    this.connectionScan = true;
+    this.reserved = true;
+    try {
+      const plans = this.store.all<Plan>("plan").filter(p => p.enabled && p.backupOnConnect);
+      const ids = new Set(plans.flatMap(p => p.destinationIds));
+      for (const id of ids) {
+        const d = this.destination(id);
+        if (d.kind !== "local") continue;
+        let present = false;
+        try { present = (await stat(join(d.location, "config"))).isFile(); } catch { /* disconnected */ }
+        const wasPresent = this.store.get<boolean>("connected", id) ?? false;
+        if (!present) {
+          const volume = this.store.get<VolumeIdentity>("volume", id);
+          if (volume) {
+            const relocated = await relocateVolume(d.location, volume.volumeId);
+            if (relocated) { d.location = relocated; try { present = (await stat(join(d.location, "config"))).isFile(); } catch { /* unavailable */ } }
+          }
+        }
+        if (present && !wasPresent) {
+          try { await this.repo(d); } catch { present = false; }
+          if (present) for (const p of plans.filter(p => p.destinationIds.includes(id))) {
+            const copy = this.store.get<Protection>("protection", p.id + ":" + id);
+            const due = this.store.get<string | null>("due", p.id);
+            if (!copy?.lastSuccess || (due && Date.parse(due) <= Date.now()) || Date.now() - Date.parse(copy.lastSuccess) >= (p.schedule.kind === "interval" ? p.schedule.minutes * 60_000 : 86400_000))
+              this.enqueuePlan(p, "drive connected", { destinationId: id });
+          }
+        }
+        this.store.put("connected", id, present);
+      }
+    } finally { this.connectionScan = false; this.reserved = false; this.emit(); void this.pump(); }
   }
   private redact(text: string) {
     let result = text;
@@ -1261,7 +1502,7 @@ export class BackupService {
     // Drain already accepted mutations before deciding whether restart is safe.
     await this.requests.catch(() => {});
     const state = this.state();
-    if (state.busy || state.jobs.some(job => ["running", "queued"].includes(job.status)))
+    if (state.busy || this.store.queued().length > 0)
       throw new Error("Wait for backup work to finish before restarting to update.");
     await this.close();
   }
@@ -1274,7 +1515,7 @@ export class BackupService {
     this.active?.abort.abort();
     this.closing = (async () => {
       await this.requests.catch(() => {});
-      while (this.running)
+      while (this.running || this.connectionScan)
         await new Promise((resolve) => setTimeout(resolve, 25));
       this.store.close();
     })();

@@ -490,6 +490,19 @@ export function PlanEditor({
           />
         </section>
         <details className="form-section">
+          <summary>Capture & automation<span>Consistency, copies and recovery drills</span></summary>
+          <Field label="Capture mode" hint={plan.capture === "sqlite" ? "Select individual SQLite database files. Captures include committed WAL data; each database is consistent independently. File rules must be empty." : plan.capture === "vss" ? "Requires Windows administrator privileges. A shadow copy can capture locked files, but does not guarantee application-consistent databases." : "Protect ordinary files. Close applications that require a consistent set of files."}>
+            <Select aria-label="Capture mode" value={plan.capture ?? "files"} onValueChange={v => update("capture", v as Plan["capture"])}><option value="files">Ordinary files</option><option value="sqlite">Live SQLite databases</option><option value="vss">Windows shadow copy (VSS)</option></Select>
+          </Field>
+          <Field label="Capture once, then copy" hint="Capture locally first, then copy that same snapshot to the other destinations. Cloud jobs can wait for an unmetered connection.">
+            <Select aria-label="Capture repository" value={plan.replicateFrom ?? ""} onValueChange={v => update("replicateFrom", v || undefined)}><option value="">Scan sources separately for each destination</option>{state.destinations.filter(d => d.kind === "local" && plan.destinationIds.includes(d.id)).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</Select>
+          </Field>
+          <CheckField label="Back up overdue files when a drive connects" hint="Sentry checks repository identity before using the drive. Manual plans become due after 24 hours." checked={plan.backupOnConnect ?? false} onChange={v => update("backupOnConnect", v)} />
+          <Field label="Automatic recovery drill" hint="Rotate through up to 12 files per destination, with a 256 MiB total limit. Results describe the tested sample, not every file.">
+            <Select aria-label="Recovery drill frequency" value={plan.recoveryDrillDays ?? 0} onValueChange={v => update("recoveryDrillDays", Number(v))}><option value={0}>Manual only</option><option value={1}>Every day</option><option value={7}>Every week</option><option value={30}>Every month</option></Select>
+          </Field>
+        </details>
+        <details className="form-section">
           <summary>
             File rules & preview<span>Include and exclude patterns</span>
           </summary>
@@ -689,12 +702,13 @@ export function RunDialog({
   const { perform } = useApp();
   const [name, setName] = useState("");
   const [pin, setPin] = useState(false);
+  const [checkpointDays, setCheckpointDays] = useState(7);
   const [busy, setBusy] = useState(false);
   return (
     <Modal
       open
       onOpenChange={onClose}
-      title={`Back up ${plan.name}`}
+      title={`Checkpoint · ${plan.name}`}
       description="Create a recoverable version before making changes."
     >
       <div className="dialog-body">
@@ -708,6 +722,7 @@ export function RunDialog({
             onChange={(e) => setName(e.target.value)}
           />
         </Field>
+        <Field label="Keep this checkpoint" hint="After this period, ordinary retention applies. Pin it below to keep it indefinitely."><Select aria-label="Checkpoint retention" value={checkpointDays} onValueChange={v => setCheckpointDays(Number(v))}><option value={1}>At least 1 day</option><option value={7}>At least 7 days</option><option value={30}>At least 30 days</option><option value={90}>At least 90 days</option></Select></Field>
         <CheckField
           label="Pin this snapshot"
           hint="Pinned snapshots are kept when old versions are pruned."
@@ -730,8 +745,9 @@ export function RunDialog({
                     planId: plan.id,
                     name: name || undefined,
                     pin,
+                    checkpointDays,
                   },
-                  "Backup queued.",
+                  "Checkpoint queued. Wait for a complete result before making changes.",
                 )
               )
                 onClose();
@@ -740,7 +756,7 @@ export function RunDialog({
             }
           }}
         >
-          Back up now
+          Create checkpoint
         </Button>
       </div>
     </Modal>

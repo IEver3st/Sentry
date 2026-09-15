@@ -13,15 +13,30 @@ import {
   nativeTheme,
 } from "electron";
 import { fork, spawn, type ChildProcess } from "node:child_process";
-import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
+import { readFile, writeFile, rename, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { cpus, freemem, totalmem } from "node:os";
+import { DiagnosticLog } from "./diagnostics";
+import type { DiagnosticsSnapshot } from "../shared/contracts";
 import { requestSchema, type State, type Request } from "../shared/contracts";
 
 import { autoUpdater } from "electron-updater";
 import { SoftwareUpdates } from "./updates";
+import { BackgroundClient, BackgroundServer, exportServiceSetup } from "./background";
+import { backgroundStatus, explorerIntegration } from "./integration";
 
 const qa = process.env.SENTRY_QA === "1";
+const serviceHost = process.argv.includes("--service-host");
+let backgroundClient: BackgroundClient | undefined;
+let backgroundServer: BackgroundServer | undefined;
+let historyPath: string | undefined;
+function historyArgument(args: string[]) {
+  const index = args.indexOf("--history");
+  const value = index >= 0 ? args[index + 1] : undefined;
+  if (value && /^[A-Za-z]:[\\/]/.test(value) && !/[\0\r\n]/.test(value) && value.length <= 32760) historyPath = value;
+}
+historyArgument(process.argv);
 // This utility renders text and controls, not video or 3D. Avoid retaining a large
 // hardware GPU context after the window closes; measured in docs/performance.md.
 app.disableHardwareAcceleration();
@@ -35,7 +50,35 @@ let installing = false;
 let updates: SoftwareUpdates;
 function publishState() {
   if (current && win && !win.isDestroyed() && !win.isMinimized())
-    win.webContents.send("sentry:state", { ...current, update: updates.state });
+    win.webContents.send("sentry:state", decorate(current));
+}
+function decorate(state: State): State { return { ...state, update: updates?.state ?? state.update, historyPath, background: { mode: backgroundClient || serviceHost ? "service" : "desktop", installed: !!backgroundClient || serviceHost, detail: backgroundClient || serviceHost ? "Connected to background protection. Closing this window does not stop the service." : "Desktop protection stops when Sentry quits or you sign out." } }; }
+const diagnosticLog = new DiagnosticLog();
+let previousWorkerCpu: { at: number; total: number } | undefined;
+let diagnosticsFlight: Promise<DiagnosticsSnapshot> | undefined;
+let metricsStarted = false;
+function collectDiagnostics(): Promise<DiagnosticsSnapshot> {
+  if (diagnosticsFlight) return diagnosticsFlight;
+  diagnosticsFlight = (async () => {
+    const start = performance.now();
+    const processes: DiagnosticsSnapshot["processes"] = app.getAppMetrics().map((p) => ({ pid: p.pid, name: p.type === "Browser" ? "Electron main" : p.type === "Tab" ? "Renderer" : p.type, cpu: metricsStarted ? p.cpu.percentCPUUsage : null, memory: p.memory.workingSetSize * 1024 }));
+    metricsStarted = true;
+    let engine: DiagnosticsSnapshot["engine"] = null;
+    let engineError: string | undefined;
+    try {
+      const result = await call({ type: "diagnostics-snapshot" }) as { process: DiagnosticsSnapshot["processes"][number]; cpuUsage: { user: number; system: number }; engine: NonNullable<DiagnosticsSnapshot["engine"]> };
+      const at = performance.now();
+      const total = result.cpuUsage.user + result.cpuUsage.system;
+      result.process.cpu = previousWorkerCpu ? Math.max(0, (total - previousWorkerCpu.total) / ((at - previousWorkerCpu.at) * 1000) * 100 / cpus().length) : null;
+      previousWorkerCpu = { at, total };
+      processes.push(result.process);
+      engine = result.engine;
+    } catch { engineError = "Backup worker did not respond. Restart Sentry if this continues."; }
+    return { capturedAt: new Date().toISOString(), collectionMs: performance.now() - start,
+      runtime: { app: app.getVersion(), electron: process.versions.electron, node: process.versions.node, platform: process.platform, arch: process.arch, uptime: process.uptime(), logicalCores: cpus().length, totalMemory: totalmem(), freeMemory: freemem(), battery: powerMonitor.isOnBatteryPower(), idleSeconds: powerMonitor.getSystemIdleTime(), encryption: safeStorage.isEncryptionAvailable(), workerConnected: !!worker?.connected, pendingRequests: pending.size },
+      processes, engine, engineError, ...diagnosticLog.snapshot() };
+  })().finally(() => { diagnosticsFlight = undefined; });
+  return diagnosticsFlight;
 }
 let current: State | undefined;
 let secrets: Record<string, string> = {};
@@ -66,13 +109,20 @@ async function saveSecrets() {
   return saveChain;
 }
 function call(request: Request | { type: "prepare-update" }): Promise<unknown> {
+  if (backgroundClient) {
+    if (request.type === "prepare-update") return Promise.reject(new Error("Stop the Windows service before installing an update."));
+    return backgroundClient.request(request);
+  }
   const id = randomUUID();
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
-    worker.send?.({ kind: "request", id, request });
+    if (!worker?.connected) { reject(new Error("Backup worker is unavailable.")); return; }
+    const timer = ["diagnostics-snapshot", "diagnostics"].includes(request.type) ? setTimeout(() => { pending.delete(id); reject(new Error("Diagnostics request timed out.")); }, 5000) : undefined;
+    pending.set(id, { resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); } });
+    worker.send({ kind: "request", id, request }, (error) => { if (error) { pending.delete(id); clearTimeout(timer); reject(error); } });
   });
 }
 function show() {
+  if (serviceHost) return;
   if (win && !win.isDestroyed()) {
     if (!qa) {
       win.show();
@@ -178,7 +228,8 @@ function updateTray() {
   );
 }
 async function quit() {
-  if (current?.busy && !qa) {
+  if (backgroundClient) { quitting = true; backgroundClient.close(); app.quit(); return; }
+  if (current?.busy && !qa && !serviceHost) {
     const result = await dialog.showMessageBox({
       type: "question",
       buttons: ["Keep protecting", "Cancel jobs and quit"],
@@ -192,9 +243,10 @@ async function quit() {
   }
   quitting = true;
   worker?.send?.({ kind: "shutdown" });
-  setTimeout(() => app.quit(), 2000).unref();
+  setTimeout(() => app.quit(), serviceHost ? 25000 : 2000).unref();
 }
 async function policy() {
+  if (backgroundClient) return;
   let metered = cachedMetered;
   if (
     process.platform === "win32" &&
@@ -236,17 +288,25 @@ async function policy() {
   worker.send?.({
     kind: "policy",
     battery: powerMonitor.isOnBatteryPower(),
-    idleSeconds: powerMonitor.getSystemIdleTime(),
+    idleSeconds: serviceHost ? 0 : powerMonitor.getSystemIdleTime(),
     metered,
   });
 }
-if (!qa && !app.requestSingleInstanceLock()) app.quit();
+if (!qa && !serviceHost && !app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on("second-instance", show);
+  app.on("second-instance", (_event, argv) => { historyArgument(argv); publishState(); show(); });
   app
     .whenReady()
     .then(async () => {
       await mkdir(data, { recursive: true });
+      updates = new SoftwareUpdates(app.isPackaged && !qa && !serviceHost, publishState, autoUpdater);
+      if (!serviceHost) {
+        const client = new BackgroundClient(data, state => { current = state; publishState(); updateTray(); }, () => { if (backgroundClient && !quitting) { diagnosticLog.add({ source: "engine", level: "error", message: "Background service disconnected" }); } });
+        if (await client.connect()) backgroundClient = client;
+      }
+      if (!backgroundClient) {
+      backgroundServer = new BackgroundServer(data, serviceHost ? "service" : "desktop", request => call(request), () => current);
+      await backgroundServer.listen();
       try {
         secrets = JSON.parse(
           safeStorage.decryptString(await readFile(secretPath)),
@@ -257,7 +317,6 @@ else {
             "Saved credentials could not be decrypted. Original credential file was preserved.",
           );
       }
-      updates = new SoftwareUpdates(app.isPackaged && !qa, publishState, autoUpdater);
       worker = fork(join(compiled, "worker.cjs"), [], {
         execPath: process.execPath,
         env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
@@ -265,7 +324,9 @@ else {
       });
       worker.stdout?.on("data", () => {});
       worker.stderr?.on("data", () => {});
+      diagnosticLog.add({ source: "application", level: "info", message: "Application session started" });
       worker.on("exit", (code) => {
+        diagnosticLog.add({ source: "engine", level: quitting ? "info" : "error", message: "Backup worker exited" });
         for (const p of pending.values())
           p.reject(
             new Error(
@@ -295,6 +356,8 @@ else {
         }
         if (m.kind === "state") {
           current = m.value as State;
+          backgroundServer?.publish(current);
+          diagnosticLog.observe(current);
           if (win && !win.isDestroyed()) {
             const scale = current.settings.uiScale / 100;
             if (win.webContents.getZoomFactor() !== scale) win.webContents.setZoomFactor(scale);
@@ -331,7 +394,7 @@ else {
             const u = new URL(m.url!);
             if (u.origin !== "https://accounts.google.com")
               throw new Error("Invalid authorization host.");
-            if (qa)
+            if (qa || serviceHost)
               throw new Error(
                 "Browser authorization is disabled during hidden validation.",
               );
@@ -354,6 +417,16 @@ else {
         clientId: process.env.SENTRY_GOOGLE_CLIENT_ID ?? "",
         clientSecret: process.env.SENTRY_GOOGLE_CLIENT_SECRET ?? "",
       });
+      }
+      if (serviceHost) {
+        await unlink(join(data, "service-stop")).catch(() => {});
+        let checkingStop = false;
+        setInterval(() => { if (checkingStop) return; checkingStop = true; void readFile(join(data, "service-stop")).then(() => quit()).catch(() => {}).finally(() => { checkingStop = false; }); }, 1000).unref();
+        powerMonitor.on("resume", () => { worker.send?.({ kind: "resume" }); void policy(); });
+        setInterval(() => void policy(), 60_000).unref();
+        void policy();
+        return;
+      }
       tray = new Tray(
         nativeImage
           .createFromPath(join(root, "assets/sentry-icon.png"))
@@ -362,6 +435,9 @@ else {
       tray.on("double-click", show);
       updateTray();
       ipcMain.handle("sentry:request", async (event, raw: unknown) => {
+        const started = performance.now();
+        let operation: Request["type"] | undefined;
+        let failed = false;
         try {
           if (
             !win ||
@@ -370,10 +446,34 @@ else {
           )
             throw new Error("Untrusted request.");
           const request = requestSchema.parse(raw);
+          operation = request.type;
+          if (request.type === "diagnostics-snapshot") return { ok: true, value: await collectDiagnostics() };
           if (installing || quitting) throw new Error("Sentry is restarting. Try again after it opens.");
-          if (request.type === "state") return { ok: true, value: { ...await call(request) as State, update: updates.state } };
+          if (request.type === "state") return { ok: true, value: decorate(await call(request) as State) };
+          if (request.type === "explorer-integration") {
+            if (qa || !app.isPackaged) throw new Error("Enable Explorer integration from the installed application.");
+            return { ok: true, value: await explorerIntegration(process.execPath, request.enabled) };
+          }
+          if (request.type === "background-service") {
+            if (request.action === "status") return { ok: true, value: await backgroundStatus(data, !!backgroundClient) };
+            if (qa || !app.isPackaged) throw new Error("Export service setup from the installed application at its permanent location.");
+            const selected = await dialog.showOpenDialog(win, { title: "Choose an empty folder for service setup", properties: ["openDirectory", "createDirectory"] });
+            if (selected.canceled || !selected.filePaths[0]) return { ok: true, value: { mode: "desktop", installed: false, detail: "Setup export cancelled." } };
+            await exportServiceSetup(selected.filePaths[0], join(root, "service"), data, process.execPath);
+            return { ok: true, value: { mode: "desktop", installed: false, detail: `Setup exported to ${selected.filePaths[0]}. Quit Sentry, then run service-setup.ps1 in administrator PowerShell using your Windows account password.` } };
+          }
+          if (request.type === "recovery-kit") {
+            const contents = await call(request) as string;
+            if (qa) return { ok: true, value: contents };
+            const selected = await dialog.showSaveDialog(win, { title: "Save recovery kit", defaultPath: "Sentry recovery kit.txt" });
+            if (selected.canceled || !selected.filePath) return { ok: true, value: "Export cancelled" };
+            await writeFile(selected.filePath, contents, "utf8");
+            return { ok: true, value: selected.filePath };
+          }
           if (request.type === "updates") {
-            if (request.action !== "install") return { ok: true, value: await updates.check() };
+            if (backgroundClient && request.action === "install") throw new Error("Stop the Windows service before installing an update. Backups must finish first.");
+            if (request.action === "check") return { ok: true, value: await updates.check() };
+            if (request.action === "download") return { ok: true, value: await updates.download() };
             if (updates.state.status !== "ready") throw new Error("No downloaded update is ready.");
             // The worker checks again atomically before stopping its scheduler.
             installing = true;
@@ -426,7 +526,10 @@ else {
             });
           }
           if (request.type === "diagnostics") {
-            const contents = (await call(request)) as string;
+            let metadata: Record<string, unknown>;
+            try { metadata = JSON.parse((await call(request)) as string) as Record<string, unknown>; }
+            catch { metadata = { partial: true, note: "Engine metadata unavailable. This report contains application counters and safe session events only; paths, account details, credentials and file contents are excluded." }; }
+            const contents = JSON.stringify({ ...metadata, diagnostics: await collectDiagnostics() }, null, 2);
             if (qa) return { ok: true, value: contents };
             const r = await dialog.showSaveDialog(win, {
               defaultPath: "sentry-diagnostics.json",
@@ -438,14 +541,18 @@ else {
           }
           return { ok: true, value: await call(request) };
         } catch (e) {
+          failed = true;
           return {
             ok: false,
             error: e instanceof Error ? e.message : "The request failed.",
           };
+        } finally {
+          if (operation && !["state", "diagnostics-snapshot", "window"].includes(operation))
+            diagnosticLog.add({ source: "request", level: failed ? "error" : "info", message: failed ? "Request failed; review the operation in Activity" : "Request completed", operation, durationMs: Math.round(performance.now() - started) });
         }
       });
       powerMonitor.on("resume", () => {
-        worker.send?.({ kind: "resume" });
+        worker?.send?.({ kind: "resume" });
         void policy();
       });
       powerMonitor.on("on-ac", () => void policy());
@@ -465,6 +572,7 @@ else {
     });
 }
 app.on("window-all-closed", () => {});
+app.on("will-quit", () => { void backgroundServer?.close(); backgroundClient?.close(); });
 app.on("before-quit", (event) => {
   if (!quitting) {
     event.preventDefault();

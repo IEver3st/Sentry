@@ -3,6 +3,7 @@ import {
   ArrowDownToLine,
   SlidersHorizontal,
   Wrench,
+  Activity,
   Cloud,
   CloudLightning,
   FolderOpen,
@@ -29,9 +30,11 @@ import {
   Status,
   useApp,
 } from "./ui";
+import { Diagnostics } from "./Diagnostics";
 import { DestinationForm } from "./PlanEditor";
+import { RecoverySettings } from "./RecoverySettings";
 
-type SettingsTab = "General" | "Destinations" | "Weather" | "Maintenance";
+type SettingsTab = "General" | "Destinations" | "Recovery" | "Weather" | "Maintenance" | "Diagnostics";
 
 function retentionSummary(result: unknown): string {
   const kept: Array<Record<string, unknown>> = [];
@@ -62,8 +65,8 @@ function retentionSummary(result: unknown): string {
     ...kept.map((snapshot) => `Keep     ${describe(snapshot)}`),
   ].join("\n");
 }
-export function SettingsPage() {
-  const [tab, setTab] = useState<SettingsTab>("General");
+export function SettingsPage({ initialTab = "General" }: { initialTab?: SettingsTab }) {
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
   return (
     <div className="settings-layout">
       <div
@@ -71,7 +74,7 @@ export function SettingsPage() {
         role="tablist"
         aria-label="Settings sections"
       >
-        {(["General", "Destinations", "Weather", "Maintenance"] as const).map(
+        {(["General", "Destinations", "Recovery", "Weather", "Maintenance", "Diagnostics"] as const).map(
           (name) => (
             <button
               key={name}
@@ -84,8 +87,10 @@ export function SettingsPage() {
                 const options: SettingsTab[] = [
                   "General",
                   "Destinations",
+                  "Recovery",
                   "Weather",
                   "Maintenance",
+                  "Diagnostics",
                 ];
                 let next: SettingsTab | undefined;
                 if (event.key === "ArrowRight" || event.key === "ArrowDown")
@@ -106,7 +111,7 @@ export function SettingsPage() {
               }}
               tabIndex={tab === name ? 0 : -1}
             >
-              {name === "General" ? <SlidersHorizontal size={16} aria-hidden="true" /> : name === "Destinations" ? <HardDrive size={16} aria-hidden="true" /> : name === "Weather" ? <CloudLightning size={16} aria-hidden="true" /> : <Wrench size={16} aria-hidden="true" />}
+              {name === "General" ? <SlidersHorizontal size={16} aria-hidden="true" /> : name === "Destinations" ? <HardDrive size={16} aria-hidden="true" /> : name === "Weather" ? <CloudLightning size={16} aria-hidden="true" /> : name === "Diagnostics" ? <Activity size={16} aria-hidden="true" /> : <Wrench size={16} aria-hidden="true" />}
               {name}
             </button>
           ),
@@ -118,13 +123,17 @@ export function SettingsPage() {
         id={`panel-${tab}`}
         aria-labelledby={`tab-${tab}`}
       >
-        <div className="settings-panel-heading"><h2>{tab}</h2><p>{tab === "General" ? "Appearance and automatic backup preferences." : tab === "Destinations" ? "Manage the repositories that hold your backups." : tab === "Weather" ? "Configure extra backups for severe weather alerts." : "Review retention, import plans and troubleshoot Sentry."}</p></div>
+        <div className="settings-panel-heading"><h2>{tab}</h2><p>{tab === "General" ? "Appearance and automatic backup preferences." : tab === "Destinations" ? "Manage the repositories that hold your backups." : tab === "Weather" ? "Configure extra backups for severe weather alerts." : tab === "Diagnostics" ? "Inspect resources, collection health and operation logs." : "Review retention, import plans and troubleshoot Sentry."}</p></div>
         {tab === "General" ? (
           <General />
         ) : tab === "Destinations" ? (
           <Destinations />
+        ) : tab === "Recovery" ? (
+          <RecoverySettings />
         ) : tab === "Weather" ? (
           <Weather />
+        ) : tab === "Diagnostics" ? (
+          <Diagnostics />
         ) : (
           <Maintenance />
         )}
@@ -135,6 +144,9 @@ export function SettingsPage() {
 function General() {
   const { state, perform } = useApp();
   const [bandwidth, setBandwidth] = useState(state.settings.bandwidthKiB);
+  const uiScale = state.settings.uiScale ?? 100;
+  // The settings contract permits percentages between the standard presets.
+  const scaleOptions = [...new Set([80, 90, 100, 110, 125, 150, 175, 200, uiScale])].sort((a, b) => a - b);
   const [saving, setSaving] = useState(false);
   const change = async (patch: Partial<Settings>) => {
     setSaving(true);
@@ -166,10 +178,10 @@ function General() {
         <div className="setting-row">
           <div><strong>UI scale</strong><p>Resize text and controls throughout Sentry.</p></div>
           <div className="scale-controls">
-            <Select aria-label="UI scale" disabled={saving} value={String(state.settings.uiScale)} onValueChange={(value) => void change({ uiScale: Number(value) })}>
-              {[80, 90, 100, 110, 125, 150, 175, 200].map((scale) => <option key={scale} value={String(scale)}>{scale}%{scale === 100 ? " (default)" : ""}</option>)}
+            <Select aria-label="UI scale" disabled={saving} value={String(uiScale)} onValueChange={(value) => void change({ uiScale: Number(value) })}>
+              {scaleOptions.map((scale) => <option key={scale} value={String(scale)}>{scale}%{scale === 100 ? " (default)" : ""}</option>)}
             </Select>
-            <Button disabled={saving || state.settings.uiScale === 100} onClick={() => void change({ uiScale: 100 })}>Reset</Button>
+            <Button disabled={saving || uiScale === 100} onClick={() => void change({ uiScale: 100 })}>Reset</Button>
           </div>
         </div>
       </section>

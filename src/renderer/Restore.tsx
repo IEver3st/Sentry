@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   ArrowDownToLine,
+  ArrowRight,
   ChevronLeft,
   ChevronRight,
   File,
@@ -10,22 +11,26 @@ import {
   Pin,
   Search,
   ShieldCheck,
+  HardDrive,
+  KeyRound,
 } from "lucide-react";
 import type { FileEntry, Snapshot } from "../shared/contracts";
+import { FileHistory } from "./FileHistory";
+import { SnapshotTools } from "./SnapshotTools";
 import {
   Button,
   Select,
   bytes,
   date,
-  Empty,
   Field,
   Modal,
   Notice,
   shortPath,
   useApp,
 } from "./ui";
+import { PreparationList, WorkflowSteps, WorkspaceIntro } from "./WorkspaceParts";
 
-export function Restore() {
+export function Restore({ connect, plans }: { connect: () => void; plans: () => void }) {
   const { state, perform, notify } = useApp();
   const [destinationId, setDestinationId] = useState(
     state.destinations[0]?.id || "",
@@ -43,10 +48,19 @@ export function Restore() {
   const [loading, setLoading] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [error, setError] = useState("");
+  const [reload, setReload] = useState(0);
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [target, setTarget] = useState("");
   const [overwrite, setOverwrite] = useState<"never" | "always">("never");
   const [busy, setBusy] = useState(false);
+  const [historyPath, setHistoryPath] = useState<string | undefined>(state.historyPath);
+  const [pendingRestore, setPendingRestore] = useState<{ snapshot: Snapshot; paths: string[] }>();
+  useEffect(() => { if (pendingRestore && snapshot?.id === pendingRestore.snapshot.id) { setSelected(pendingRestore.paths); setRestoreOpen(true); setPendingRestore(undefined); } }, [pendingRestore, snapshot]);
+  const selectRecovery = (version: Snapshot, paths: string[]) => {
+    setHistoryPath(undefined);
+    if (destinationId !== version.destinationId) { setPendingRestore({ snapshot: version, paths }); setDestinationId(version.destinationId); }
+    else { setSnapshot(version); setSelected(paths); setRestoreOpen(true); }
+  };
   useEffect(() => {
     const timer = setTimeout(() => {
       setQuery(search);
@@ -57,11 +71,12 @@ export function Restore() {
   useEffect(() => {
     let active = true;
     setSnapshot(undefined);
+    setSnapshots([]);
     setSnapshotOffset(0);
     setFiles([]);
     setSelected([]);
     setError("");
-    if (!destinationId) return;
+    if (!destinationId) { setLoading(false); return; }
     setLoading(true);
     void window.sentry
       .request({
@@ -72,7 +87,7 @@ export function Restore() {
       .then((result) => {
         if (active) {
           setSnapshots(result);
-          setSnapshot(result[0]);
+          setSnapshot(pendingRestore?.snapshot ?? result[0]);
           setOffset(0);
         }
       })
@@ -85,14 +100,17 @@ export function Restore() {
     return () => {
       active = false;
     };
-  }, [destinationId, planId]);
+  }, [destinationId, planId, reload]);
   useEffect(() => {
     let active = true;
     setError("");
     if (!snapshot) {
       setFiles([]);
+      setFileLoading(false);
+      setTotal(0);
       return;
     }
+    setFiles([]);
     setFileLoading(true);
     void window.sentry
       .request({
@@ -149,8 +167,13 @@ export function Restore() {
     }
   }
   return (
-    <>
-      <div className="restore-filters">
+    <div className="restore-workspace">
+      <WorkflowSteps current={!destinationId ? 0 : !snapshot ? 1 : 2} steps={[
+        { title: "Choose a repository", detail: state.destinations.find(item => item.id === destinationId)?.name || "Connect where your backups live" },
+        { title: "Find a saved version", detail: snapshot ? date(snapshot.time) : "Browse snapshots by date" },
+        { title: "Recover your files", detail: selected.length ? `${selected.length} paths selected` : "A separate folder by default" },
+      ]} />
+      {state.destinations.length > 0 && <><div className="restore-source-toolbar"><div className="restore-filters">
         <Field label="Destination">
           <Select
             aria-label="Restore destination"
@@ -181,31 +204,26 @@ export function Restore() {
             ))}
           </Select>
         </Field>
-      </div>
-      {error && <Notice error>{error}</Notice>}
+      </div><Button onClick={() => setHistoryPath("")}><FileClock size={15} />Find a file's history</Button></div></>}
+      {error && <Notice error>{error}<Button size="small" onClick={() => setReload(value => value + 1)}>Try again</Button></Notice>}
       {!state.destinations.length ? (
-        <Empty
-          icon={<FileClock size={28} />}
-          heading="Connect a repository to recover files"
-        >
-          Add a destination in Settings. An existing repository and its password
-          are enough, even after reinstalling Sentry.
-        </Empty>
+        <>
+          <div className="workspace-empty-split"><WorkspaceIntro icon={<HardDrive size={29} />} eyebrow="RECOVER FROM A BACKUP" title="Connect a repository to recover files." action={<Button variant="primary" onClick={connect}>Connect repository<ArrowRight size={15} /></Button>}>Connect the drive or cloud location holding your backups. An existing repository and its password are enough, even after reinstalling Sentry.</WorkspaceIntro><PreparationList title="Have these ready" items={[
+            { title: "Your backup location", detail: "The local folder, external drive, or cloud destination containing your repository." },
+            { title: "Your recovery password", detail: "The password used to encrypt the repository when it was created." },
+            { title: "A folder for recovered files", detail: "Choose a separate location to keep your current work intact." },
+          ]} /></div>
+          <section className="recovery-safety"><KeyRound size={20} /><div><h3>Recovery belongs to your repository</h3><p>You can recover with your repository and password without Sentry's local database. Keep the password somewhere safe.</p></div></section>
+        </>
       ) : loading ? (
-        <div className="loading-state">Reading snapshots…</div>
-      ) : !snapshots.length ? (
-        <Empty
-          icon={<FileClock size={28} />}
-          heading="No snapshots in this selection"
-        >
-          Create a backup or choose another destination. Only committed
-          snapshots appear here.
-        </Empty>
-      ) : (
+        <div className="workspace-loading" role="status"><FileClock size={22} /><div><strong>Reading snapshots…</strong><p>Looking for saved versions in this repository.</p></div></div>
+      ) : !snapshots.length && !error ? (
+        <WorkspaceIntro icon={<FileClock size={29} />} eyebrow="NO SAVED VERSIONS" title="No snapshots in this selection" action={<div className="button-group"><Button onClick={() => setReload(value => value + 1)}>Refresh snapshots</Button><Button variant="primary" onClick={plans}>Go to backup plans<ArrowRight size={15} /></Button></div>}>Create a backup or choose another destination. Only committed snapshots appear here.</WorkspaceIntro>
+      ) : snapshots.length > 0 ? (
         <div className="restore-browser">
           <aside className="snapshot-list">
             <div className="inspector-heading">
-              <h2>Versions</h2>
+                <h2>Saved versions</h2>
               <span>{snapshots.length}</span>
             </div>
             <div className="snapshot-scroll">
@@ -230,6 +248,7 @@ export function Restore() {
                       {item.name || item.planName || "Recovered snapshot"}
                     </strong>
                     <small>
+                      {item.checkpointUntil && Date.parse(item.checkpointUntil) > Date.now() ? `Checkpoint until ${date(item.checkpointUntil)} · ` : ""}
                       {item.incomplete
                         ? "Incomplete snapshot"
                         : `${item.paths.length} source${item.paths.length === 1 ? "" : "s"}`}
@@ -273,6 +292,7 @@ export function Restore() {
                 <p>{snapshot ? date(snapshot.time) : "Choose a version"}</p>
               </div>
               <div className="button-group">
+                {snapshot && <SnapshotTools snapshot={snapshot} snapshots={snapshots} onSelect={selectRecovery} />}
                 <Button
                   size="icon"
                   aria-label={
@@ -389,7 +409,7 @@ export function Restore() {
                     ? `${selected.length} selected`
                     : "Full snapshot"}
                 </strong>
-                <small>Restored content is verified.</small>
+                <small>Choose a separate folder in the next step.</small>
               </div>
               {selected.length > 0 && (
                 <Button
@@ -400,9 +420,10 @@ export function Restore() {
                   Clear selection
                 </Button>
               )}
+              {selected.length === 1 && <Button size="small" onClick={() => setHistoryPath(selected[0])}><FileClock size={14} />History & preview</Button>}
               <Button
                 variant="primary"
-                disabled={!snapshot}
+                disabled={!snapshot || fileLoading || !!error}
                 onClick={() => setRestoreOpen(true)}
               >
                 <ArrowDownToLine size={15} />
@@ -411,14 +432,14 @@ export function Restore() {
             </div>
           </section>
         </div>
-      )}
+      ) : null}
       <Modal
         open={restoreOpen}
         onOpenChange={setRestoreOpen}
         title="Restore files"
         description={
           selected.length
-            ? `Restore ${selected.length} selected paths from this snapshot.`
+            ? `Restore ${selected.length} selected ${selected.length === 1 ? "path" : "paths"} from this snapshot.`
             : "Restore all files and folders from this snapshot."
         }
       >
@@ -500,6 +521,7 @@ export function Restore() {
           </Button>
         </div>
       </Modal>
-    </>
+      {historyPath !== undefined && <FileHistory initialPath={historyPath} onClose={() => setHistoryPath(undefined)} onRestore={(version, path) => selectRecovery(version, [path])} />}
+    </div>
   );
 }

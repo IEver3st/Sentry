@@ -6,6 +6,7 @@ function fixture(enabled = true) {
     autoDownload: false, autoInstallOnAppQuit: true, allowPrerelease: true, allowDowngrade: true, logger: null,
     checks: 0,
     async checkForUpdates() { this.checks++; return null; },
+    async downloadUpdate() { return []; },
     quitAndInstall() {},
   });
   const updates = new SoftwareUpdates(enabled, () => {}, driver as unknown as ConstructorParameters<typeof SoftwareUpdates>[2]);
@@ -23,6 +24,9 @@ test("development never checks; automatic installation and downgrade stay disabl
 test("download completion alone permits restart; checks cannot replace a ready update", async () => {
   const { updates, driver } = fixture();
   driver.emit("update-available", { version: "0.2.0" });
+  expect(updates.state.status).toBe("available");
+  expect(driver.autoDownload).toBe(false);
+  await updates.download();
   expect(updates.state.status).toBe("downloading");
   driver.emit("download-progress", { percent: 52.1 });
   expect(updates.state.progress).toBe(52.1);

@@ -29,6 +29,8 @@ const app = await electron.launch({
 const page = await app.firstWindow();
 const errors: string[] = [];
 page.on("pageerror", (e) => errors.push(e.message));
+await page.waitForSelector(".setup, .sidebar", { timeout: 30000 });
+if (await page.locator(".setup").count()) await page.getByRole("button", { name: "Set up later", exact: true }).click();
 await page.waitForSelector(".sidebar", { timeout: 30000 });
 async function request<T extends Request>(
   value: T,

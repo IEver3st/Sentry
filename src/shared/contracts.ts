@@ -1,3 +1,5 @@
+import type { DiagnosticsSnapshot } from "./diagnostics";
+export type { DiagnosticsSnapshot, DiagnosticEvent } from "./diagnostics";
 import { z } from "zod";
 
 const id = z
@@ -72,6 +74,16 @@ export const weatherSchema = z.object({
   planIds: z.array(id).max(100),
   cooldownMinutes: z.number().int().min(15).max(10080),
 });
+export const overviewSchema = z.object({
+  days: z.union([z.literal(7), z.literal(30)]),
+  widgets: z.array(z.enum(["activity", "outcomes", "data", "ledger", "recent"])).max(5)
+    .refine((items) => new Set(items).size === items.length, "Choose each section once"),
+});
+export type OverviewPreferences = z.infer<typeof overviewSchema>;
+export const defaultOverview: OverviewPreferences = {
+  days: 7,
+  widgets: ["activity", "outcomes", "ledger", "recent"],
+};
 export const settingsSchema = z.object({
   theme: z.enum(["dark", "light", "system"]),
   uiScale: z.number().int().min(80).max(200).default(100),
@@ -83,6 +95,8 @@ export const settingsSchema = z.object({
   paused: z.boolean(),
   weather: weatherSchema,
   discoveryRoots: z.array(path).max(16).optional(),
+  overview: overviewSchema.optional(),
+  onboardingDismissed: z.boolean().optional(),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 export const defaults: Settings = {
@@ -222,7 +236,7 @@ export interface State {
   background?: BackgroundStatus;
 }
 export interface UpdateState {
-  status: "idle" | "unavailable" | "checking" | "current" | "downloading" | "ready" | "installing" | "error";
+  status: "idle" | "unavailable" | "checking" | "current" | "available" | "downloading" | "ready" | "installing" | "error";
   version?: string;
   progress?: number;
   message?: string;
@@ -328,6 +342,7 @@ export const requestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("google-disconnect") }),
   z.object({ type: z.literal("google-quota") }),
   z.object({ type: z.literal("diagnostics") }),
+  z.object({ type: z.literal("diagnostics-snapshot") }),
   z.object({ type: z.literal("legacy-import"), path }),
   z.object({
     type: z.literal("choose-path"),
@@ -373,6 +388,7 @@ export interface ResponseMap {
   "google-disconnect": boolean;
   "google-quota": { used: number; limit?: number };
   diagnostics: string;
+  "diagnostics-snapshot": DiagnosticsSnapshot;
   "legacy-import": { imported: number; warnings: string[] };
   "choose-path": string[];
   window: boolean;

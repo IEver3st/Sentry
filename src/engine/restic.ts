@@ -22,6 +22,8 @@ export interface Repository {
 export type EngineEvent = Record<string, unknown>;
 export interface ResticSnapshot {
   id: string;
+  tree?: string;
+  original?: string;
   short_id?: string;
   time: string;
   paths: string[];
@@ -507,7 +509,10 @@ export class ResticEngine {
     const copyRepo = { ...target, env: { ...source.env, ...target.env, RESTIC_FROM_PASSWORD: source.password } };
     await this.run(copyRepo, ["copy", "--from-repo", source.location, id], undefined, signal);
     const copied = (await this.snapshots(target, signal)).find(s =>
-      s.id === id || (s as ResticSnapshot & { original?: string }).original === id);
+      s.tree === sourceSnapshot.tree && s.time === sourceSnapshot.time &&
+      JSON.stringify(s.paths) === JSON.stringify(sourceSnapshot.paths) &&
+      JSON.stringify([...(s.tags ?? [])].sort()) === JSON.stringify([...(sourceSnapshot.tags ?? [])].sort()) &&
+      (s.id === id || s.original === (sourceSnapshot.original ?? id)));
     if (!copied) throw new Error("The copied snapshot could not be confirmed in the destination repository.");
     await this.check(target, false, signal);
     return copied.id;
@@ -656,6 +661,7 @@ export class ResticEngine {
     signal?: AbortSignal,
   ): Promise<EngineEvent[]> {
     const events: EngineEvent[] = [];
+    const checkpointTags = new Set((await this.snapshots(repo, signal)).flatMap(s => s.tags ?? []).filter(t => t.startsWith("sentry:checkpoint:") && Date.parse(t.slice("sentry:checkpoint:".length)) > Date.now()));
     const args = [
       "forget",
       "--tag",
@@ -674,6 +680,7 @@ export class ResticEngine {
         ? ["--dry-run"]
         : ["--prune", "--max-unused", "5%", "--max-repack-size", "256M"]),
     ];
+    for (const tag of checkpointTags) args.push("--keep-tag", tag);
     await this.run(
       repo,
       args,

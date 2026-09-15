@@ -61,6 +61,7 @@
       "package.json"
     ],
     "extraResources": [
+      { "from": "dist/service", "to": "service" },
       {
         "from": "vendor/bin",
         "to": "engines",

@@ -431,6 +431,8 @@ async function main(): Promise<void> {
           planId: plan.id,
         })) as string[];
         assert.equal(queued.length, 2);
+        await assert.rejects(service.prepareUpdate(), /Wait for backup work/);
+        assert.equal(service.store.getJob(queued[1]).status, "queued");
         await service.request({ type: "cancel", id: queued[0] });
         assert.equal(service.store.getJob(queued[0]).status, "cancelled");
         const historyBefore = service.store.jobs().total;
@@ -592,6 +594,11 @@ async function main(): Promise<void> {
         }
       },
     );
+    await scenario("idle update preparation closes the worker and rejects further work", async () => {
+      await idle();
+      await service.prepareUpdate();
+      await assert.rejects(service.request({ type: "run" }), /shutting down/);
+    });
   } catch (error) {
     results.push({
       scenario: "fixture prerequisites",
