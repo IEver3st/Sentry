@@ -6,3 +6,4 @@ vendor/bin/
 *.tsbuildinfo
 .env*
 !.env.example
+vendor/downloads/
