@@ -1,0 +1,8 @@
+node_modules/
+dist/
+release/
+outputs/
+vendor/bin/
+*.tsbuildinfo
+.env*
+!.env.example
