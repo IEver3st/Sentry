@@ -1,0 +1,31 @@
+# Installer + update feed. `bun run dist` builds the Windows installer into dist/.
+# Publishing a GitHub Release with that output is what electron-updater checks.
+appId: com.ever3st.sentry
+productName: Sentry
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**
+  - package.json
+  - resources/**
+asarUnpack:
+  - resources/**
+win:
+  target: nsis
+  icon: resources/icon.ico
+nsis:
+  oneClick: true
+  perMachine: false
+  createDesktopShortcut: true
+  shortcutName: Sentry
+  include: build/installer.nsh
+mac:
+  icon: resources/icon.png
+# Repository replacement approved; the older backup app is retained on its backup branch.
+# The release workflow additionally verifies the repository binding before publishing.
+publish:
+  provider: github
+  owner: IEver3st
+  repo: Sentry
+  private: false

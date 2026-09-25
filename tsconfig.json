@@ -1,1 +1,8 @@
-{"compilerOptions":{"target":"ES2023","lib":["ES2023","DOM","DOM.Iterable"],"module":"ESNext","moduleResolution":"Bundler","jsx":"react-jsx","strict":true,"noEmit":true,"esModuleInterop":true,"skipLibCheck":true,"types":["node","bun","vite/client"]},"include":["src","scripts","tests","vite.config.ts"]}
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": { "@shared/*": ["src/shared/*"] }
+  },
+  "files": [],
+  "references": [{ "path": "./tsconfig.node.json" }, { "path": "./tsconfig.web.json" }]
+}

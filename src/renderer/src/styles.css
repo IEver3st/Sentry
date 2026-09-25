@@ -1,0 +1,218 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+
+/* Keep UI state mounted while hidden, but stop decorative animation work. */
+html[data-window-active='false'] *,
+html[data-window-active='false'] *::before,
+html[data-window-active='false'] *::after {
+  animation-play-state: paused !important;
+}
+
+@theme {
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
+
+  --color-ink-950: #0b0d14;
+  --color-ink-900: #0e1018;
+  --color-ink-850: #12151f;
+  --color-ink-800: #161a26;
+  --color-ink-750: #1b2030;
+  --color-ink-700: #222839;
+  --color-ink-600: #2d3448;
+  --color-ink-500: #454d66;
+  --color-fog-500: #6f7690;
+  --color-fog-400: #8d93ab;
+  --color-fog-300: #b3b8cc;
+  --color-fog-100: #e7e9f3;
+
+  --color-amber: #f2b35b;
+  --color-amber-soft: #f2b35b1f;
+  --color-mint: #5fd39a;
+  --color-rose: #f07a7a;
+  --color-sky: #6aa8ff;
+
+  --color-cat-documents: #5b7fc7;
+  --color-cat-media: #8a63c9;
+  --color-cat-code: #c7784a;
+  --color-cat-archives: #3f9a9a;
+  --color-cat-apps: #4f9e6b;
+  --color-cat-games: #b0577a;
+  --color-cat-synced: #4aa3b8;
+  --color-cat-cache: #b89a3e;
+  --color-cat-system: #5f6678;
+  --color-cat-other: #6b7185;
+
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --radius-tile: 3px;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-ink-900 text-fog-100 font-sans antialiased;
+    font-feature-settings: 'ss01', 'cv11';
+    overflow: hidden;
+    user-select: none;
+  }
+  input,
+  textarea,
+  [data-selectable] {
+    user-select: text;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-amber);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  ::selection {
+    background: #f2b35b55;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #ffffff14;
+    border-radius: 10px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: #ffffff26;
+  }
+}
+
+@utility drag {
+  -webkit-app-region: drag;
+}
+@utility no-drag {
+  -webkit-app-region: no-drag;
+}
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+}
+/* Diagonal hatch used for anything reclaimable, as in the map legend. */
+@utility hatch {
+  background-image: repeating-linear-gradient(135deg, #ffffff1c 0 1.5px, transparent 1.5px 6px);
+}
+
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  transition-duration: 0ms !important;
+  animation-duration: 0ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+.skeleton {
+  background: linear-gradient(90deg, #ffffff08 25%, #ffffff12 50%, #ffffff08 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+@keyframes stripes {
+  to {
+    background-position: 24px 0;
+  }
+}
+.progress-live {
+  background-image: repeating-linear-gradient(135deg, #ffffff26 0 6px, transparent 6px 12px);
+  background-size: 24px 100%;
+  animation: stripes 0.8s linear infinite;
+}
+
+/* ---------- Appearance: backgrounds ---------- */
+html[data-theme='graphite'] {
+  --color-ink-950: #1c1f25;
+  --color-ink-900: #23272e;
+  --color-ink-850: #282c34;
+  --color-ink-800: #2d323a;
+  --color-ink-750: #333842;
+  --color-ink-700: #3a404b;
+  --color-ink-600: #474e5b;
+}
+html[data-theme='oled'] {
+  --color-ink-950: #000000;
+  --color-ink-900: #050506;
+  --color-ink-850: #0a0b0e;
+  --color-ink-800: #101116;
+  --color-ink-750: #15171d;
+  --color-ink-700: #1b1e25;
+  --color-ink-600: #262a33;
+}
+
+/* ---------- Appearance: accent ---------- */
+html[data-accent='sky'] {
+  --color-amber: #6aa8ff;
+}
+html[data-accent='mint'] {
+  --color-amber: #5fd39a;
+}
+html[data-accent='rose'] {
+  --color-amber: #f28a8a;
+}
+html[data-accent='violet'] {
+  --color-amber: #a88bf5;
+}
+
+/* ---------- Drag and drop targets ---------- */
+[data-drop-active] {
+  outline: 2px solid var(--color-amber) !important;
+  outline-offset: -2px;
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--color-amber) 22%, transparent), inset 0 0 40px color-mix(in oklab, var(--color-amber) 25%, transparent) !important;
+  filter: brightness(1.15);
+  z-index: 20;
+}
+[data-dragging] {
+  opacity: 0.45;
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Indeterminate progress: a segment sliding along the track. */
+@keyframes slide-segment {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(260%);
+  }
+}
+.indeterminate {
+  position: relative;
+}
+.indeterminate::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: 9999px;
+  background: var(--color-amber);
+  animation: slide-segment 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}

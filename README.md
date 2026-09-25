@@ -1,86 +1,139 @@
 # Sentry
 
-Sentry keeps encrypted, versioned copies of important files on Windows. Create a plan, choose its sources and destinations, and recover files from dated snapshots. Local backup does not require an account.
+A desktop home for the Google Drive storage you already pay for. Drop files in, pull them out, share links, and see where your space goes on a Disktree-style storage map covering both Drive and this PC.
 
-This repository is the Electron rebuild, maintained on `main`. It uses React, strict TypeScript, Bun, Vite, Radix/shadcn primitives and SQLite. The backup worker runs restic 0.19.1; rclone 1.75.1 supplies Google Drive transport. No Tauri or Rust application backend is included.
+Electron + React + TypeScript + Tailwind v4, built with electron-vite and Bun.
 
-## Run and build
+## Run
 
-Windows x64, Bun and Node 24 or later:
-
-```powershell
-bun install
-bun run engines:fetch
-bun run dev
-```
-
-`dev` builds the application and starts Electron. After changing source, restart this command. It does not start a second protection service.
-
-```powershell
+```bash
+bun install          # if Electron's binary is missing: node node_modules/electron/install.js
+bun run dev          # hot-reloading app
+bun run build        # production bundle in out/
 bun run typecheck
-bun run lint
-bun test
-bun run test:service
-bun run build
-bun run package
+bun run test:google  # OAuth and Drive regression tests with mocked Google responses
+bun run test:performance # hidden event delivery, ongoing transfers, and updater scheduling
+bun run test:scan    # run after build; checks worker cleanup, hidden scans, and cancellation
+bun run test:window  # run after build; native startup, reopen, navigation, and reload regression checks
+bun run capture      # headless end-to-end run: writes screenshots + log to ./capture
+bun run capture:background # focused native background checks; output in ./capture/background
 ```
 
-The installer is written to `release/Sentry Setup 0.1.0.exe`; the unpacked application is `release/win-unpacked/Sentry.exe`. The candidate is unsigned. No release is published by these commands.
+> If Electron starts as plain Node (`does not provide an export named 'BrowserWindow'`), your shell has
+> `ELECTRON_RUN_AS_NODE=1` set. Unset it for the session: `env -u ELECTRON_RUN_AS_NODE bun run dev`.
 
-For isolated native validation that opens no visible window:
+`bun run capture` uses an offscreen window that is never shown. It walks onboarding, then every page, and
+does a real upload → download → share-link round trip against the demo drive. All test data stays inside
+`./capture`, with a fresh profile on every run.
 
-```powershell
-bun run qa
-bun run qa --packaged
-bun run benchmark
-node --experimental-strip-types scripts/stress.ts
+### Background resource use
+
+Hidden and minimized windows stop receiving transfer progress and Drive invalidations. Main-process
+transfers, completion notifications, and update handling continue. Reopening delivers current transfer
+state and merges the pending Drive changes into one refresh. The renderer keeps its existing view state;
+closing to the tray does not discard open selections or dialogs. Launching with `--hidden` defers loading
+the renderer until the window is opened when Start minimized and Show tray icon are enabled.
+
+Drive reads and automatic maps are deferred while hidden. Automatic map refreshes run only on pages
+that display the map, with a trailing refresh if files change during a scan. Local scans explicitly
+started by the user continue, but stop emitting progress while hidden. Scan workers exit when finished
+or cancelled, and metadata requests are bounded to 48 rather than queued for every entry at once.
+
+`bun run test:scan` uses a temporary 400-file fixture and checks repeated worker exits. An optional
+original worker path (`node scripts/check-scan.mjs <original-scan-worker.js>`) compares the same workload.
+`bun run capture` also writes `capture/background-check.json`: native Electron IPC checks for a hidden
+demo upload, resumed state, SHA-256 download integrity, and scan cancellation. It controls the activity
+signal while keeping the native window offscreen; it does not operate the real tray or establish
+whole-app CPU/RAM savings or live Google transfer performance.
+
+## How it fits together
+
+```
+src/shared/          types.ts (the whole IPC contract), kinds.ts (mime/extension → kind/category)
+src/main/            index.ts        window, settings, provider switching, IPC handlers
+                     providers/      DriveProvider interface + demo.ts + google.ts + google-auth.ts
+                     transfers.ts    upload/download queue (3 concurrent, progress events, no-overwrite naming)
+                     map.ts          Drive storage map + suggestions; runs the local scan worker
+                     scan-worker.ts  walks a local folder off-thread, flags caches/build output as clearable
+                     capture.ts      headless verification harness (--capture)
+src/preload/         contextBridge → window.sentry (typed as SentryApi)
+src/renderer/src/    App.tsx shell, pages/ (Onboarding, Home, Files = My Drive map+list, Map = This PC, Shared,
+                     Transfers, Settings = full-screen takeover),
+                     components/ (Treemap, ShareDialog, DropZone, Sidebar, ...), lib/store.ts (zustand)
 ```
 
-QA uses a fresh profile and disposable sources under `outputs/`. Screenshots show actual fixture backup results, not seeded operational history. To run interactively on a secondary display, start Electron with `--secondary-display`; placement is determined before the first show. Agent validation must never display a window on monitor 0.
+The renderer only ever talks to `window.sentry`. Everything provider-specific sits behind `DriveProvider`
+in `src/main/providers/types.ts`. Switching from demo to Google needs no UI changes.
 
-## Protection and recovery
+### Demo drive
+`providers/demo.ts` stores an index plus real blobs under `<userData>/demo-drive`. On first run it seeds a sample
+library. Sample entries have metadata only: they're flagged `sample: true`, and the UI disables "Pull" for
+them. Anything you upload is stored for real and can be pulled back down, shared, renamed, or trashed.
 
-- Plans support multiple files/folders, editable include/exclude rules, previews, presets, schedules, duplication, enable/disable, and manual named or pinned snapshots. Development presets preserve `.git` and configuration files unless you explicitly exclude them.
-- Each destination has its own repository identity, outcome, last complete copy and verification result. A failed destination can be retried independently.
-- Snapshots are complete recoverable versions with content deduplication. Every repository is encrypted by restic. Save the recovery password somewhere independent of this PC; losing both the saved credential and your password prevents recovery.
-- Restore filters snapshots by plan/date and searches paginated paths. Restore to a separate folder by default. Existing-file collisions stay untouched unless overwrite is selected, and skipped collisions are reported as partial. Restic verifies restored bytes.
-- After reinstalling, connect an existing repository with its recovery password. Sentry rebuilds its catalog from encrypted repository metadata; the original SQLite database is not required.
-- Integrity checks, sample recovery, pinned snapshots, and daily/weekly/monthly retention are available. Automatic pruning runs at most once per day after a successful backup. Incomplete protection or unexpectedly large changes suspend pruning until reviewed.
+## Connect Google Drive
 
-## Background behavior
+Sentry uses the Drive v3 REST API and Desktop app OAuth. On September 25, 2026, this PC completed
+Google sign-in, saved an encrypted session with offline refresh access, and displayed existing Drive
+file metadata in the desktop app. Live upload/download integrity, refresh after expiry, and permission
+changes have not yet been verified; their automated coverage uses mocked Google responses.
 
-Closing the window destroys its renderer and keeps Sentry in the tray. Minimize retains the window. Tray controls open Sentry, run enabled plans, or pause protection. In desktop mode, explicit Quit cancels active work and stops scheduling. Settings > Recovery can export an optional Windows service installer. Once installed under the same Windows account, the service owns the engine and closing or quitting the desktop client leaves protection running. See [recovery features and service setup](docs/recovery.md) for installation and validation boundaries.
+1. Select your Google Cloud project and enable the **Google Drive API**. This PC uses `autobackups-460205` (AutoBackups).
+2. Set up the OAuth consent screen and add yourself as a test user.
+3. Create or reuse an OAuth client of type **Desktop app** and save its client JSON when Google makes it available.
+4. In onboarding or **Settings → Drive & account**, choose **Import Google client JSON**. Sentry accepts Google's
+   downloaded `installed` format and saves the configuration in `%APPDATA%/Sentry/google-client.json`.
+5. Choose **Continue with Google** in onboarding, or **Connect Google Drive** from the demo's account settings.
+   Finish consent in your browser. Switching directly from demo preserves its local files.
 
-Calendar schedules follow the PC's local time zone. Missed occurrences become one catch-up run; monthly days clamp to month end. Sleep/resume and time-zone changes re-evaluate due work. Durable queued jobs survive restart; interrupted jobs remain visible for retry. Repository operations are serialized, and automatic destination failures receive at most two retries with backoff.
+Environment variables `SENTRY_GOOGLE_CLIENT_ID` and `SENTRY_GOOGLE_CLIENT_SECRET` are also supported and take
+precedence over the imported file. The local file can alternatively contain `{ "clientId": "...", "clientSecret": "..." }`.
+Web application clients are rejected. Keep client JSON and tokens out of the repository.
 
-Scheduled jobs can wait for AC power, five minutes of idle time or an unmetered connection. Unknown network cost pauses automatic cloud work unless metered connections are allowed. Manual jobs bypass those three waiting policies, while the global pause applies to all queued work. Bandwidth limits apply to engine upload and download. Login startup is opt-in.
+What to verify once connected, in `providers/google.ts` / `google-auth.ts`:
+- **Sign-in:** loopback redirect on `127.0.0.1:<random port>/callback` with PKCE. Tokens are encrypted with
+  `safeStorage` in `<userData>/google-token.bin`, and refresh happens automatically. Sentry refuses plaintext
+  token storage, validates callback state, supports cancellation, and offers sign-in again for expired or revoked sessions.
+- **Listing:** `list`, `recent`, `search`, and `shared` (which uses `visibility = 'anyoneWithLink'`). Folder sizes
+  come from the cache built by `allFiles()`, so they show "—" until the storage map has loaded once.
+- **Uploads:** resumable, in 8 MiB chunks. Interrupted chunks query Google's confirmed position before retrying.
+  Live verification should include a file above 100 MB and cancellation halfway through.
+- **Downloads:** Google Docs/Sheets/Slides export to docx/xlsx/pptx. Export-limit failures have an actionable message.
+  Binary downloads check their size and available MD5 checksum, refuse overwrites, and remove incomplete output.
+- **Share links:** public permissions are listed with pagination; updates and removal use Google's returned permission ID.
+- **Move** (drag onto a folder tile, row, or breadcrumb): `PATCH files/{id}?addParents=&removeParents=`.
+- **Scope:** full `drive`. This is a restricted scope; fine for personal/test-user use, but it needs Google
+  verification before a public release.
 
-## Google Drive and weather
+`bun run test:google` covers callback state and PKCE, token persistence and refresh, cancellation, incomplete consent,
+listing, permission IDs, interrupted and empty uploads, download integrity, and account-switch blocking during transfer preparation.
+These tests use temporary profiles and mocked Google responses. `bun run capture` separately exercises the Electron
+IPC bridge and demo upload/download/share flow. Neither check establishes access to a live Google account.
 
-Google Drive uses browser-based Desktop OAuth, PKCE and a loopback callback. Tokens are persisted with Windows DPAPI through Electron safeStorage. Production client configuration and Google consent verification are external prerequisites. See [Google setup and automation behavior](docs/automation.md) for exact configuration and test boundaries. No fake connection is provided.
+## Updates, background, and Explorer
 
-Cloud destinations receive snapshots through restic's rclone backend. By default, destinations capture sources sequentially and backup retries scan sources again. With a copy source selected in Capture & automation, Sentry captures once and copies that committed snapshot to the other repositories. These copies preserve the original capture time and never rescan live files. Each destination retains its own encryption, outcome and retry history. Pending or failed copies hold their source snapshot against pruning until copied or explicitly abandoned.
+- **Updates** (`src/main/updater.ts`): electron-updater against GitHub Releases at `IEver3st/Sentry`.
+  `bun run dist` builds the NSIS installer into `dist/`. Matching version tags run the verified Windows release
+  workflow using GitHub's temporary token; see [release instructions](docs/releases.md). Dev runs report
+  "unavailable" rather than pretending to check. Settings → Updates: auto check, background download, install on
+  quit, early releases.
+- **Background** (`src/main/background.ts`): tray menu, launch at sign-in (`--hidden`), start in the tray, close to
+  tray, Windows notifications while hidden, one running instance at a time.
+- **Explorer** (`src/main/shell-integration.ts`): Settings → Startup & background adds "Send to Google Drive" to the
+  right-click menu for files and folders (HKCU, no admin; under "Show more options" on Windows 11) plus a
+  "Google Drive (Sentry)" Send to shortcut. Launches carry `--upload <paths>` and are handed to the running app,
+  batched, and sent to My Drive or a "From my PC" folder. The uninstaller removes both (`build/installer.nsh`).
+- **Local-only mode**: onboarding can skip Google entirely; Sentry then maps this PC and offers Drive as an optional
+  add-on from the sidebar or Settings → Drive & account.
 
-Weather automation uses the US National Weather Service API. Configure coordinates, alert types, severities and selected plans. Real alerts are checked for coverage, freshness, expiry and duplication; a cooldown limits repeated runs. Priority plans and off-device destinations run first. Simulation describes eligible plans without creating a real protection-history entry. Coverage outside the NWS service area is unavailable. Weather checks supplement regular schedules.
+## App icon
+`resources/icon.ico` (16-256 px, used on Windows) and `resources/icon.png` (1024 px) are rendered from the four-tile
+mark by `python scripts/make-icon.py`. The window and taskbar use them via `?asset` imports in `src/main/index.ts`, and
+Sentry sets its own AppUserModelID so Windows groups it under this icon. When packaging, point the installer at the same
+files (for example electron-builder `win.icon: resources/icon.ico`, `mac.icon: resources/icon.png`).
 
-## Legacy compatibility
-
-The reference source is [Sentry-Old](https://github.com/IEver3st/Sentry-Old), reviewed at `850002d7a3e8e2324120b74da5d1e8f19e4d718e`. Import its `app_state.json` from Settings after connecting a new destination. Imported plans are disabled and manual until reviewed. Existing exclusion rules remain inspectable; no legacy credentials are imported.
-
-Legacy ZIPs and manifests are never modified. Their changed-file-only archives and relative-path identity cannot reliably establish a complete versioned snapshot. Keep all original archives and manifests, extract needed files into a separate directory, and check their contents. Sentry does not invent deleted-file history or merge ambiguous legacy roots.
-
-## Scope and validation
-
-Sentry protects files, not a disk image or bootable system backup. Capture & automation offers ordinary files, Windows VSS and live SQLite capture. VSS requires suitable privileges and provides a crash-consistent filesystem snapshot; Sentry does not coordinate arbitrary application writers. SQLite capture uses the online backup API, including committed WAL contents, and validates each database independently. Close other applications that need consistent multi-file state before an ordinary-file backup.
-
-File history provides verified text/image previews, side-by-side versions and recovery of deleted files. Snapshot Changes lists added, changed and deleted paths. Temporary named checkpoints survive retention until their expiry; permanent pins remain available. Optional recovery drills rotate a bounded sample and report the actual files verified. Protection review checks stale copies, disk overlap, exclusions and opt-in discovery folders. Recovery kits contain locations and standalone recovery instructions without passwords; Practice recovery requires a newly entered password and bypasses the saved catalog. Details and limits are in [recovery features](docs/recovery.md).
-
-See [architecture](docs/architecture.md), [engine decision](docs/engine-decision.md), [design](DESIGN.md), [validation](docs/validation.md), [idle performance](docs/performance.md) and [backup responsiveness](docs/stress-validation.md). Physical drive removal, installed login behavior, real Google account transfers and long-duration soak validation must be distinguished from fixture and packaged-executable checks.
-
-Snapshots and activity are paginated in the interface; files stream into SQLite. Restic snapshot metadata has a 16 MiB response ceiling. Very large exact-file include selections may reach that limit and fail visibly. Restic's memory cap is a soft target; repository indexes can exceed it. Source errors retain actionable details in local history; exported diagnostics omit paths, names, tokens, passwords, file contents and raw engine errors.
-
-Updates are checked only when requested. Sentry opens the trusted GitHub release page after active jobs finish; installation is user controlled. The application does not silently download, install, or publish a release.
-
-## Licenses
-
-Sentry uses the MIT license. Restic and rclone license texts, pinned versions and official download hashes are in `vendor/notices` and included in the Windows package. The two approved original identity images are preserved under `assets/originals`.
+## Known gaps
+- No restore-from-trash inside Sentry. Trash is recoverable for 30 days in Google Drive.
+- No background folder sync or watch; uploads are explicit (drop, pick, or "Back up to Drive" on the map).
+- The "Clearable" local items are advisory only. Sentry never deletes anything on your PC.
+- Windows NSIS packaging and release automation are configured; no signing certificate is configured.
+- Upgrading an installed release through download, installation, and relaunch still needs end-to-end verification.

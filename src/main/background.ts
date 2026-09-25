@@ -1,135 +1,162 @@
-import { createServer, createConnection, type Socket, type Server } from "node:net";
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { readFile, writeFile, mkdir, copyFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
-import { spawn } from "node:child_process";
-import type { Request, State } from "../shared/contracts";
-import { requestSchema } from "../shared/contracts";
+import { app, BrowserWindow, Menu, nativeImage, Notification, Tray } from 'electron'
+import type { Settings, Transfer, UpdateStatus } from '@shared/types'
 
-export function serviceName(data: string) { return "Sentry-" + createHash("sha256").update(data.toLowerCase()).digest("hex").slice(0, 16); }
-const endpoint = (data: string) => process.platform === "win32" ? `\\\\.\\pipe\\${serviceName(data)}` : join(data, "background.sock");
-const tokenPath = (data: string) => join(data, "background-token");
-const MAX_MESSAGE = 16 * 1024 * 1024;
-async function protectToken(file: string) {
-  if (process.platform !== "win32") return;
-  const script = `$ErrorActionPreference='Stop'; $sentryAcl=[IO.File]::GetAccessControl($env:SENTRY_TOKEN_FILE); $sentryUser=[Security.Principal.WindowsIdentity]::GetCurrent().User; $sentryAcl.SetAccessRuleProtection($true,$false); foreach($sentryExisting in @($sentryAcl.Access)) { [void]$sentryAcl.RemoveAccessRuleAll($sentryExisting) }; foreach($sentrySid in @($sentryUser.Value,'S-1-5-18','S-1-5-32-544')) { $sentryRule=[Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sentrySid),'FullControl','Allow'); $sentryAcl.AddAccessRule($sentryRule) }; [IO.File]::SetAccessControl($env:SENTRY_TOKEN_FILE,$sentryAcl)`;
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script], { shell: false, windowsHide: true, env: { ...process.env, SENTRY_TOKEN_FILE: file }, stdio: "ignore" });
-    const timer = setTimeout(() => { child.kill(); reject(new Error("Could not secure background authentication.")); }, 10000);
-    child.once("error", e => { clearTimeout(timer); reject(e); });
-    child.once("close", code => { clearTimeout(timer); if (code === 0) resolve(); else reject(new Error("Could not secure background authentication.")); });
-  });
+type Route = 'home' | 'files' | 'map' | 'shared' | 'transfers' | 'settings'
+
+interface Deps {
+  settings: () => Settings
+  window: () => BrowserWindow | null
+  navigate: (route: Route) => void
+  pickAndUpload: () => void
+  checkForUpdates: () => void
+  installUpdate: () => void
+  trayIcon: string
 }
-const proof = (token: string, challenge: string) => createHmac("sha256", token).update(challenge).digest("hex");
-function equalProof(expected: string, value: unknown) { return typeof value === "string" && /^[a-f0-9]{64}$/.test(value) && timingSafeEqual(Buffer.from(expected), Buffer.from(value)); }
-function reader(socket: Socket, receive: (value: Record<string, unknown>) => void) {
-  let buffer = "";
-  socket.setEncoding("utf8");
-  socket.on("data", chunk => {
-    buffer += String(chunk);
-    if (Buffer.byteLength(buffer) > MAX_MESSAGE) { socket.destroy(); return; }
-    let end;
-    while ((end = buffer.indexOf("\n")) >= 0) {
-      const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
-      try { const value = JSON.parse(line) as Record<string, unknown>; if (!value || typeof value !== "object") throw new Error(); receive(value); }
-      catch { socket.destroy(); return; }
+
+/**
+ * Everything that lets Sentry live quietly in the background: the tray,
+ * launch at sign-in, close-to-tray, and system notifications while hidden.
+ */
+export class Background {
+  private tray: Tray | null = null
+  quitting = false
+  private toldAboutTray = false
+  private activeTransfers = 0
+  private update: UpdateStatus | null = null
+  private loginEnabled: boolean | null = null
+
+  constructor(private readonly deps: Deps) {
+    app.on('before-quit', () => (this.quitting = true))
+  }
+
+  /** Apply login item + tray settings. Safe to call after every settings change. */
+  apply(): void {
+    const s = this.deps.settings()
+    if ((process.platform === 'win32' || process.platform === 'darwin') && this.loginEnabled !== s.launchAtLogin) {
+      // Dev builds launch through electron.exe, so the app folder must ride along.
+      const args = [...(app.isPackaged ? [] : [app.getAppPath()]), '--hidden']
+      app.setLoginItemSettings({ openAtLogin: s.launchAtLogin, path: process.execPath, args })
+      this.loginEnabled = s.launchAtLogin
     }
-  });
-}
-function send(socket: Socket, value: unknown) {
-  if (!socket.destroyed && socket.writableLength < MAX_MESSAGE) socket.write(JSON.stringify(value) + "\n");
-  else socket.destroy();
-}
-export class BackgroundServer {
-  private server?: Server;
-  private clients = new Set<Socket>();
-  constructor(private data: string, private mode: "desktop" | "service", private request: (request: Request) => Promise<unknown>, private state: () => State | undefined) {}
-  async listen() {
-    await mkdir(this.data, { recursive: true });
-    let token: string;
-    try { token = await readFile(tokenPath(this.data), "utf8"); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; token = randomBytes(32).toString("hex"); try { await writeFile(tokenPath(this.data), token, { flag: "wx", mode: 0o600 }); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; token = await readFile(tokenPath(this.data), "utf8"); } }
-    if (!/^[a-f0-9]{64}$/.test(token)) throw new Error("Background authentication file is invalid. Original file was preserved.");
-    await protectToken(tokenPath(this.data));
-    this.server = createServer(socket => {
-      let authenticated = false;
-      let challenge: string | undefined;
-      const timer = setTimeout(() => { if (!authenticated) socket.destroy(); }, 3000);
-      socket.on("error", () => {});
-      socket.on("close", () => { clearTimeout(timer); this.clients.delete(socket); });
-      reader(socket, message => {
-        if (!authenticated) {
-          if (!challenge && typeof message.nonce === "string" && /^[a-f0-9]{64}$/.test(message.nonce)) {
-            challenge = randomBytes(32).toString("hex");
-            send(socket, { kind: "challenge", nonce: challenge, proof: proof(token, message.nonce + ":server") }); return;
-          }
-          if (!challenge || !equalProof(proof(token, challenge + ":client"), message.proof)) { socket.destroy(); return; }
-          authenticated = true; clearTimeout(timer); this.clients.add(socket);
-          send(socket, { kind: "hello", mode: this.mode, state: this.state() });
-          return;
+    if (s.showTray && !this.tray) this.createTray()
+    if (!s.showTray && this.tray) {
+      this.tray.destroy()
+      this.tray = null
+    }
+    this.refreshMenu()
+  }
+
+  /** Should a window launched with these args stay hidden? */
+  startHidden(argv: string[]): boolean {
+    const s = this.deps.settings()
+    return argv.includes('--hidden') && s.startMinimized && s.showTray
+  }
+
+  /** Close button: hide to tray instead of quitting when the user wants that. */
+  attach(win: BrowserWindow): void {
+    win.on('close', (e) => {
+      const s = this.deps.settings()
+      if (this.quitting || !s.closeToTray || !this.tray) return
+      e.preventDefault()
+      win.hide()
+      if (!this.toldAboutTray) {
+        this.toldAboutTray = true
+        this.notify('Sentry is still running', 'It keeps transfers going from the tray. Quit from the tray menu anytime.', true)
+      }
+    })
+  }
+
+  show(route?: Route): void {
+    const win = this.deps.window()
+    if (!win) return
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+    if (route) this.deps.navigate(route)
+  }
+
+  isHidden(): boolean {
+    const win = this.deps.window()
+    return !win || !win.isVisible() || win.isMinimized() || !win.isFocused()
+  }
+
+  /** Native notification, only when the user can't see Sentry (or when forced). */
+  notify(title: string, body: string, force = false, route?: Route): void {
+    if (!Notification.isSupported()) return
+    if (!force && (!this.deps.settings().systemNotifications || !this.isHidden())) return
+    const n = new Notification({ title, body, icon: this.deps.trayIcon, silent: false })
+    n.on('click', () => this.show(route))
+    n.show()
+  }
+
+  onTransfers(list: Transfer[]): void {
+    const active = list.filter((t) => t.state === 'running' || t.state === 'queued').length
+    if (this.activeTransfers > 0 && active === 0) {
+      const recent = list.filter((t) => t.finishedAt && Date.now() - Date.parse(t.finishedAt) < 120_000)
+      const failed = recent.filter((t) => t.state === 'failed').length
+      const up = recent.filter((t) => t.state === 'done' && t.direction === 'up').length
+      const down = recent.filter((t) => t.state === 'done' && t.direction === 'down').length
+      if (failed) this.notify(`${failed} transfer${failed === 1 ? '' : 's'} didn’t finish`, 'Open Sentry to see what happened.', false, 'transfers')
+      else if (up || down)
+        this.notify(
+          up ? 'Safely in Google Drive' : 'Pulled down',
+          [up && `${up} file${up === 1 ? '' : 's'} uploaded`, down && `${down} downloaded`].filter(Boolean).join(', ') + '.',
+          false,
+          'transfers'
+        )
+    }
+    if (active !== this.activeTransfers) {
+      this.activeTransfers = active
+      this.refreshMenu()
+    }
+  }
+
+  onUpdate(status: UpdateStatus): void {
+    const wasReady = this.update?.state === 'ready'
+    this.update = status
+    if (status.state === 'ready' && !wasReady) {
+      this.notify(`Sentry ${status.version} is ready`, this.deps.settings().installOnQuit ? 'It installs next time Sentry quits, or restart now from the tray.' : 'Restart Sentry from the tray to finish updating.')
+    }
+    this.refreshMenu()
+  }
+
+  private createTray(): void {
+    const image = nativeImage.createFromPath(this.deps.trayIcon)
+    // .ico carries its own small sizes on Windows; other platforms get a scaled PNG.
+    this.tray = new Tray(process.platform === 'win32' || image.isEmpty() ? image : image.resize({ width: 16, height: 16 }))
+    this.tray.setToolTip('Sentry')
+    this.tray.on('click', () => this.show())
+    this.tray.on('double-click', () => this.show())
+  }
+
+  private refreshMenu(): void {
+    if (!this.tray) return
+    const moving = this.activeTransfers
+    const u = this.update
+    this.tray.setToolTip(moving ? `Sentry · ${moving} file${moving === 1 ? '' : 's'} moving` : 'Sentry')
+    const template: Electron.MenuItemConstructorOptions[] = [
+      { label: 'Open Sentry', click: () => this.show() },
+      { label: 'Send files to Drive…', click: () => this.deps.pickAndUpload() },
+      { type: 'separator' },
+      moving
+        ? { label: `${moving} file${moving === 1 ? '' : 's'} moving…`, click: () => this.show('transfers') }
+        : { label: 'Transfers', click: () => this.show('transfers') },
+      { label: 'Settings', click: () => this.show('settings') },
+      { type: 'separator' },
+      u?.state === 'ready'
+        ? { label: `Restart to update to ${u.version}`, click: () => this.deps.installUpdate() }
+        : u?.state === 'downloading'
+          ? { label: `Downloading update… ${u.progress ?? 0}%`, enabled: false }
+          : { label: 'Check for updates', enabled: u?.state !== 'unsupported', click: () => this.deps.checkForUpdates() },
+      { type: 'separator' },
+      {
+        label: 'Quit Sentry',
+        click: () => {
+          this.quitting = true
+          app.quit()
         }
-        if (typeof message.id !== "string" || message.id.length > 64) { socket.destroy(); return; }
-        const id = message.id;
-        const parsed = requestSchema.safeParse(message.request);
-        if (!parsed.success || ["window", "choose-path", "updates", "background-service", "explorer-integration"].includes(parsed.data.type)) { send(socket, { kind: "response", id, error: "Unsupported background request." }); return; }
-        void this.request(parsed.data).then(value => send(socket, { kind: "response", id, value })).catch(() => send(socket, { kind: "response", id, error: "The background operation failed. Check Activity or reconnect the repository." }));
-      });
-    });
-    await new Promise<void>((resolve, reject) => { this.server!.once("error", reject); this.server!.listen(endpoint(this.data), () => { this.server!.removeListener("error", reject); this.server!.on("error", () => {}); resolve(); }); });
+      }
+    ]
+    this.tray.setContextMenu(Menu.buildFromTemplate(template))
   }
-  publish(state: State) { for (const socket of this.clients) send(socket, { kind: "state", value: state }); }
-  async close() { for (const socket of this.clients) socket.destroy(); if (this.server) await new Promise<void>(resolve => this.server!.close(() => resolve())); }
-}
-
-export class BackgroundClient {
-  private pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-  private sequence = 0;
-  private socket?: Socket;
-  mode: "desktop" | "service" = "service";
-  connected = false;
-  constructor(private data: string, private publish: (state: State) => void, private disconnected: () => void) {}
-  async connect(): Promise<boolean> {
-    let token: string;
-    try { token = await readFile(tokenPath(this.data), "utf8"); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
-    return new Promise<boolean>((resolve, reject) => {
-      const socket = createConnection(endpoint(this.data)); this.socket = socket;
-      let settled = false;
-      let verifiedServer = false;
-      const nonce = randomBytes(32).toString("hex");
-      const timer = setTimeout(() => { if (!settled) { settled = true; socket.destroy(); reject(new Error("Background service did not authenticate. It may still own your backup catalog.")); } }, 4000);
-      socket.on("connect", () => send(socket, { nonce }));
-      socket.on("error", (error: NodeJS.ErrnoException) => {
-        if (!settled) { settled = true; clearTimeout(timer); if (["ENOENT", "ECONNREFUSED"].includes(error.code ?? "")) resolve(false); else reject(error); }
-      });
-      socket.on("close", () => {
-        this.connected = false;
-        if (!settled) { settled = true; clearTimeout(timer); reject(new Error("Background service rejected authentication.")); }
-        for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error("Background service disconnected. Reopen Sentry to reconnect.")); } this.pending.clear();
-        this.disconnected();
-      });
-      reader(socket, message => {
-        if (message.kind === "challenge" && !verifiedServer && typeof message.nonce === "string" && /^[a-f0-9]{64}$/.test(message.nonce) && equalProof(proof(token, nonce + ":server"), message.proof)) { verifiedServer = true; send(socket, { proof: proof(token, message.nonce + ":client") }); return; }
-        if (!verifiedServer) { socket.destroy(); return; }
-        if (message.kind === "hello" && !settled) { settled = true; clearTimeout(timer); this.connected = true; this.mode = message.mode === "service" ? "service" : "desktop"; if (message.state) this.publish(message.state as State); resolve(true); }
-        if (message.kind === "state") this.publish(message.value as State);
-        if (message.kind === "response") { const p = this.pending.get(String(message.id)); if (!p) return; clearTimeout(p.timer); this.pending.delete(String(message.id)); if (message.error) p.reject(new Error(String(message.error))); else p.resolve(message.value); }
-      });
-    });
-  }
-  request(request: Request): Promise<unknown> {
-    if (!this.socket || this.socket.destroyed) return Promise.reject(new Error("Background service is disconnected. Reopen Sentry to reconnect."));
-    const id = String(++this.sequence);
-    return new Promise((resolve, reject) => { const timer = setTimeout(() => { this.pending.delete(id); reject(new Error("The background request timed out. Check Activity before retrying.")); }, 10 * 60_000); this.pending.set(id, { resolve, reject, timer }); send(this.socket!, { id, request }); });
-  }
-  close() { this.socket?.destroy(); }
-}
-
-export async function exportServiceSetup(folder: string, resources: string, data: string, executable: string) {
-  // The setup installs under the same Windows account, preserving user-scoped DPAPI.
-  // It never serializes credentials or changes the system just by exporting.
-  await mkdir(folder, { recursive: true });
-  if ((await readdir(folder)).length) throw new Error("Choose an empty folder for the service setup export.");
-  await copyFile(join(resources, "SentryService.exe"), join(folder, "SentryService.exe"));
-  await copyFile(join(resources, "service-setup.ps1"), join(folder, "service-setup.ps1"));
-  await writeFile(join(folder, "service-config.json"), JSON.stringify({ name: serviceName(data), data, executable }, null, 2), { flag: "wx" });
 }
