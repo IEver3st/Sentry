@@ -51,7 +51,7 @@ const defaults = (): Settings => ({
   scanRoot: homedir(),
   reduceMotion: false,
   theme: 'midnight',
-  accent: 'amber',
+  accent: 'sky',
   uiScale: 1,
   startPage: 'home',
   confirmTrash: true,
@@ -136,7 +136,9 @@ const background = new Background({
   pickAndUpload: () => void pickAndSend(),
   checkForUpdates: () => void updater.check(),
   installUpdate: () => updater.install(),
-  trayIcon: appIcon
+  trayIcon: appIcon,
+  notificationIcon: iconPng,
+  appId
 })
 
 const updater = new Updater(

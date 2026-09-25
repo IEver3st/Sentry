@@ -48,6 +48,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun run test:performance
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun run test:notifications
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tests/release-config.test.mjs tests/release-assets.test.mjs
       - run: bun run build
       - run: bun run test:scan

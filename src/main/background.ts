@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Menu, nativeImage, Notification, Tray } from 'electron'
 import type { Settings, Transfer, UpdateStatus } from '@shared/types'
+import { registerNotificationIdentity } from './notification-identity'
 
 type Route = 'home' | 'files' | 'map' | 'shared' | 'transfers' | 'settings'
 
@@ -11,6 +12,8 @@ interface Deps {
   checkForUpdates: () => void
   installUpdate: () => void
   trayIcon: string
+  notificationIcon: string
+  appId: string
 }
 
 /**
@@ -24,6 +27,7 @@ export class Background {
   private activeTransfers = 0
   private update: UpdateStatus | null = null
   private loginEnabled: boolean | null = null
+  private notificationIdentity: Promise<void> | null = null
 
   constructor(private readonly deps: Deps) {
     app.on('before-quit', () => (this.quitting = true))
@@ -84,7 +88,21 @@ export class Background {
   notify(title: string, body: string, force = false, route?: Route): void {
     if (!Notification.isSupported()) return
     if (!force && (!this.deps.settings().systemNotifications || !this.isHidden())) return
-    const n = new Notification({ title, body, icon: this.deps.trayIcon, silent: false })
+    void this.showNotification(title, body, force, route)
+  }
+
+  private async showNotification(title: string, body: string, force: boolean, route?: Route): Promise<void> {
+    if (process.platform === 'win32') {
+      this.notificationIdentity ??= registerNotificationIdentity(this.deps.appId, this.deps.notificationIcon).catch((error) => {
+        // Keep transfer/update alerts working if Windows denies registration; retry next time.
+        this.notificationIdentity = null
+        console.warn('Could not register Sentry notification identity:', error)
+      })
+      await this.notificationIdentity
+    }
+    // The user may reopen the app or turn notifications off during registration.
+    if (this.quitting || (!force && (!this.deps.settings().systemNotifications || !this.isHidden()))) return
+    const n = new Notification({ title, body, icon: this.deps.notificationIcon, silent: false })
     n.on('click', () => this.show(route))
     n.show()
   }

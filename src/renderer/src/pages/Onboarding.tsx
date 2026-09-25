@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowLeft, ArrowRight, Check } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, Lock, Monitor } from 'lucide-react'
 import type { MapCategory } from '@shared/types'
 import { api, errorMessage, scanMap, useApp } from '@/lib/store'
 import { useSize } from '@/lib/hooks'
 import { Mosaic } from '@/components/Mosaic'
-import { GoogleButton, GoogleSetupNote } from '@/components/GoogleButton'
+import { GoogleMark, GoogleSetupNote } from '@/components/GoogleButton'
 import { Button, cx, Logo, Spinner } from '@/components/ui'
 
 const STEPS = ['welcome', 'name', 'connect', 'setup', 'ready'] as const
@@ -131,8 +131,8 @@ export function Onboarding() {
           {STEPS.map((s, i) => (
             <motion.span
               key={s}
-              className="h-1 rounded-full"
-              animate={{ width: i === index ? 28 : 10, backgroundColor: i <= index ? '#f2b35b' : '#ffffff1a' }}
+              className={cx('h-1 rounded-full transition-colors duration-300', i <= index ? 'bg-amber' : 'bg-white/10')}
+              animate={{ width: i === index ? 28 : 10 }}
               transition={{ type: 'spring', stiffness: 400, damping: 30 }}
             />
           ))}
@@ -199,43 +199,48 @@ export function Onboarding() {
               {step === 'connect' && (
                 <>
                   <h1 className="text-[34px] leading-tight font-semibold tracking-[-0.02em]">How do you want to start?</h1>
-                  <p className="mt-3 text-fog-400">Sentry works great with just this PC. Google Drive is optional and you can add it anytime.</p>
+                  <p className="mt-3 text-[15px] leading-relaxed text-fog-400">Pick one. You can add or remove Google Drive anytime.</p>
 
-                  <div className="mt-9 flex flex-col items-start gap-3">
-                    {status.googleConfigured ? (
-                      <>
-                        <GoogleButton busy={connecting === 'google'} disabled={connecting !== null} onClick={() => connect('google')} />
-                        <Button size="lg" onClick={chooseLocal} disabled={connecting !== null}>
-                          {connecting === 'local' ? <Spinner size={15} /> : null} Start with this PC only
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <Button variant="primary" size="lg" onClick={chooseLocal} disabled={connecting !== null} autoFocus>
-                          Start with this PC only {connecting === 'local' ? <Spinner size={15} /> : <ArrowRight size={17} />}
-                        </Button>
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                          <GoogleButton disabled onClick={() => undefined} />
-                          {status.provider === 'google' ? (
-                            <Button size="sm" onClick={disconnectGoogle} disabled={connecting !== null}>
-                              Disconnect to replace Google client
-                            </Button>
+                  <div className="mt-8 flex flex-col gap-3">
+                    <StartOption
+                      icon={<Monitor size={24} strokeWidth={1.6} className="text-fog-300" />}
+                      title="This PC only"
+                      body="Map your disk, see what’s eating space, and clean it up safely."
+                      busy={connecting === 'local'}
+                      disabled={connecting !== null}
+                      onClick={chooseLocal}
+                      autoFocus={!status.googleConfigured}
+                    />
+                    <StartOption
+                      icon={<GoogleMark size={22} />}
+                      title="This PC and Google Drive"
+                      body="Everything above, plus upload, pull files down, share links, and map your cloud storage."
+                      busy={connecting === 'google'}
+                      disabled={connecting !== null || !status.googleConfigured}
+                      onClick={() => connect('google')}
+                      footer={
+                        connecting === 'google' ? (
+                          <span className="flex items-center gap-3 text-fog-400">
+                            Finish signing in in your browser.
+                            <button onClick={() => void api().cancelGoogleSignIn()} className="font-medium text-fog-100 hover:underline hover:underline-offset-4">
+                              Cancel
+                            </button>
+                          </span>
+                        ) : !status.googleConfigured ? (
+                          status.provider === 'google' ? (
+                            <span className="text-fog-500">
+                              Google client needs replacing.{' '}
+                              <button onClick={disconnectGoogle} disabled={connecting !== null} className="font-medium text-amber hover:underline hover:underline-offset-4 disabled:opacity-50">
+                                Disconnect to replace it
+                              </button>
+                            </span>
                           ) : (
                             <GoogleSetupNote disabled={connecting !== null} />
-                          )}
-                        </div>
-                      </>
-                    )}
+                          )
+                        ) : null
+                      }
+                    />
                   </div>
-
-                  {connecting === 'google' && (
-                    <div className="mt-4 flex items-center gap-3 text-[13px] text-fog-400">
-                      <span>Finish signing in in your browser.</span>
-                      <Button variant="ghost" size="sm" onClick={() => void api().cancelGoogleSignIn()}>
-                        Cancel
-                      </Button>
-                    </div>
-                  )}
 
                   {connectError && (
                     <p role="alert" className="mt-4 rounded-lg bg-rose/10 px-3 py-2 text-[13px] text-rose">
@@ -243,14 +248,7 @@ export function Onboarding() {
                     </p>
                   )}
 
-                  <dl className="mt-9 grid grid-cols-2 gap-x-8 gap-y-1 border-t border-white/[0.06] pt-5 text-[12.5px]">
-                    <dt className="font-medium text-fog-300">This PC only</dt>
-                    <dt className="font-medium text-fog-300">With Google Drive</dt>
-                    <dd className="text-fog-500">Map your disk, find what’s eating space, clean it up safely.</dd>
-                    <dd className="text-fog-500">Plus upload, pull down, share links, and map your cloud plan.</dd>
-                  </dl>
-
-                  <div className="mt-6 flex items-center gap-5 text-[13px]">
+                  <div className="mt-7 flex items-center gap-5 text-[13px]">
                     {!settings.onboarded && (
                       <button onClick={() => move(-1)} disabled={connecting !== null} className="flex items-center gap-1.5 text-fog-400 hover:text-fog-100 disabled:opacity-40">
                         <ArrowLeft size={14} /> Back
@@ -259,11 +257,13 @@ export function Onboarding() {
                     <button
                       onClick={() => connect('demo')}
                       disabled={connecting !== null}
-                      className="flex items-center gap-2 text-fog-400 hover:text-fog-100 hover:underline hover:underline-offset-4 disabled:opacity-40"
+                      className="flex items-center gap-2 text-fog-400 hover:text-fog-100 disabled:opacity-40"
                     >
                       Try a demo drive {connecting === 'demo' && <Spinner size={13} />}
                     </button>
-                    <span className="ml-auto text-fog-500">Sign-ins stay encrypted on this PC.</span>
+                    <span className="ml-auto flex items-center gap-1.5 text-fog-500">
+                      <Lock size={12} /> Sign-ins stay encrypted on this PC
+                    </span>
                   </div>
                 </>
               )}
@@ -363,6 +363,50 @@ function Legend({ emphasis }: { emphasis: MapCategory[] | 'all' }) {
           {label}
         </span>
       ))}
+    </div>
+  )
+}
+
+/** One path at the start fork: the whole card is the action, with room for a note underneath. */
+function StartOption({
+  icon,
+  title,
+  body,
+  busy,
+  disabled,
+  onClick,
+  autoFocus,
+  footer
+}: {
+  icon: ReactNode
+  title: string
+  body: string
+  busy: boolean
+  disabled: boolean
+  onClick: () => void
+  autoFocus?: boolean
+  footer?: ReactNode
+}) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-white/[0.07] bg-ink-850 transition-colors has-[button:enabled:hover]:border-white/[0.14] has-[button:enabled:hover]:bg-ink-800">
+      <button
+        onClick={onClick}
+        disabled={disabled}
+        autoFocus={autoFocus}
+        className="group flex w-full items-center gap-4 px-5 py-4.5 text-left disabled:cursor-default"
+      >
+        <span className="grid size-7 shrink-0 place-items-center transition-opacity group-disabled:opacity-40">{icon}</span>
+        <span className="min-w-0 flex-1 transition-opacity group-disabled:opacity-40">
+          <span className="block text-[15.5px] font-semibold tracking-tight text-fog-100">{title}</span>
+          <span className="mt-1 block text-[13.5px] leading-snug text-fog-400">{body}</span>
+        </span>
+        {busy ? (
+          <Spinner size={16} />
+        ) : (
+          <ArrowRight size={18} className="shrink-0 text-fog-500 transition-[color,transform] group-enabled:group-hover:translate-x-0.5 group-enabled:group-hover:text-fog-100 group-disabled:opacity-40" />
+        )}
+      </button>
+      {footer && <div className="border-t border-white/[0.06] px-5 py-3 text-[12.5px]">{footer}</div>}
     </div>
   )
 }

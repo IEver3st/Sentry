@@ -70,7 +70,7 @@ html[data-window-active='false'] *::after {
     border-radius: 6px;
   }
   ::selection {
-    background: #f2b35b55;
+    background: color-mix(in srgb, var(--color-amber) 33%, transparent);
   }
   ::-webkit-scrollbar {
     width: 10px;

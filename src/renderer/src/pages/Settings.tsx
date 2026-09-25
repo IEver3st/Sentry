@@ -55,7 +55,7 @@ const DEFAULTS: Partial<Settings> = {
   installOnQuit: true,
   betaUpdates: false,
   theme: 'midnight',
-  accent: 'amber',
+  accent: 'sky',
   uiScale: 1,
   reduceMotion: false,
   sizeBars: true,
@@ -863,8 +863,8 @@ function ThemePicker({ value, onChange }: { value: Theme; onChange: (v: Theme) =
 }
 
 const ACCENTS: Array<{ id: Accent; color: string; label: string }> = [
-  { id: 'amber', color: '#f2b35b', label: 'Amber' },
   { id: 'sky', color: '#6aa8ff', label: 'Sky' },
+  { id: 'amber', color: '#f2b35b', label: 'Amber' },
   { id: 'mint', color: '#5fd39a', label: 'Mint' },
   { id: 'rose', color: '#f28a8a', label: 'Rose' },
   { id: 'violet', color: '#a88bf5', label: 'Violet' }

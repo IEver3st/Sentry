@@ -293,7 +293,7 @@ export async function runCapture(win: BrowserWindow, outDir: string, setRenderer
       await shot(`34-boot-graphite-${at}`, 0)
     }
     await wait(1500)
-    await js(`window.sentry.updateSettings({ theme: 'midnight', accent: 'amber' }).then(s => window.__sentry.useApp.setState({ settings: s }))`)
+    await js(`window.sentry.updateSettings({ theme: 'midnight', accent: 'sky' }).then(s => window.__sentry.useApp.setState({ settings: s }))`)
 
     // Empty folder state
     await js(`window.sentry.createFolder(null, 'Empty test').then(f => window.__sentry.go('files', f.id))`)
