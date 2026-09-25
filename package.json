@@ -1,7 +1,7 @@
 {
   "name": "sentry",
   "productName": "Sentry",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "A friendly desktop home for your Google Drive storage.",
   "main": "out/main/index.js",

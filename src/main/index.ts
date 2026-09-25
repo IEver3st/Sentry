@@ -23,6 +23,8 @@ import iconPng from '../../resources/icon.png?asset'
 
 /** Windows wants the multi-size .ico for crisp taskbar/Alt-Tab icons at every DPI. */
 const appIcon = process.platform === 'win32' ? iconIco : iconPng
+const appId = app.isPackaged ? 'com.ever3st.sentry' : 'com.ever3st.sentry.dev'
+if (process.platform === 'win32') app.setAppUserModelId(appId)
 
 const captureBackground = process.argv.includes('--capture-background')
 const capture = process.argv.includes('--capture') || captureBackground
@@ -490,6 +492,18 @@ function createWindow(): BrowserWindow {
       offscreen: capture
     }
   })
+  if (process.platform === 'win32') {
+    // Explorer reads this independently of BrowserWindow's icon. Use the packaged
+    // executable's embedded icon, or the real .ico on disk for electron.exe in dev.
+    win.setAppDetails({
+      appId,
+      appIconPath: app.isPackaged ? process.execPath : iconIco,
+      appIconIndex: 0,
+      relaunchDisplayName: 'Sentry',
+      relaunchCommand: [process.execPath, ...(app.isPackaged ? [] : [app.getAppPath()])]
+        .map((path) => `"${path}"`).join(' ')
+    })
+  }
   if (!capture) win.once('ready-to-show', () => !hidden && win.show())
   background.attach(win)
   win.on('show', syncRendererActivity)
@@ -528,9 +542,6 @@ function createWindow(): BrowserWindow {
   else loadRenderer()
   return win
 }
-
-// Own taskbar identity on Windows, so Sentry groups and shows its icon instead of Electron's.
-if (process.platform === 'win32') app.setAppUserModelId('com.ever3st.sentry')
 
 app.on('second-instance', (_event, argv, _cwd, data) => {
   const paths = (data as { upload?: string[] } | undefined)?.upload ?? uploadPathsFrom(argv)
