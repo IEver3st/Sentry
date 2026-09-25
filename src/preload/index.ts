@@ -7,6 +7,7 @@ const call =
     ipcRenderer.invoke(`sentry:${name}`, ...args)
 
 const methods = [
+  'localDrives',
   'bootstrap', 'rendererReady', 'updateSettings', 'resetApp', 'connect', 'disconnect', 'importGoogleClient', 'cancelGoogleSignIn', 'quota', 'get', 'list', 'recent', 'search', 'shared',
   'createFolder', 'rename', 'trash', 'move', 'toggleStar', 'setLink', 'pickLocal', 'pickDirectory', 'upload', 'download',
   'cancelTransfer', 'clearTransfers', 'transfers', 'revealLocal', 'openExternal', 'copyText', 'setWindowColors', 'updateStatus', 'checkForUpdates', 'downloadUpdate', 'installUpdate', 'shellIntegration', 'setShellIntegration', 'openLocal', 'trashLocal', 'lastLocalScan', 'forgetLocalScan', 'scanDrive', 'scanLocal', 'cancelScan'

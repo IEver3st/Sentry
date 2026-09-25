@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { rmSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { INBOX_FOLDER, THEME_BACKGROUND, type AppBootstrap, type ProviderId, type ProviderStatus, type SentryEvents, type Settings } from '@shared/types'
 import type { DriveProvider } from './providers/types'
@@ -16,6 +16,8 @@ import { RendererEvents } from './renderer-events'
 import { runCapture } from './capture'
 import { Background } from './background'
 import { LocalScanCache } from './local-cache'
+import { containsPath, normalizeRoots, selectedRoots } from './local-roots'
+import { localDrives } from './local-drives'
 import { Updater } from './updater'
 import { installShellIntegration, removeShellIntegration, shellStatus, uploadPathsFrom } from './shell-integration'
 import iconIco from '../../resources/icon.ico?asset'
@@ -202,9 +204,7 @@ async function pickAndSend(): Promise<void> {
 
 /** This PC actions may only touch what the user chose to scan. */
 function insideScanRoot(path: string, allowRoot = false): boolean {
-  const rel = relative(resolve(settings.scanRoot), resolve(path))
-  if (rel === '') return allowRoot
-  return !rel.startsWith('..') && !isAbsolute(rel)
+  return selectedRoots(settings).some((root) => containsPath(root, path) && (allowRoot || !containsPath(path, root)))
 }
 
 async function loadSettings(): Promise<void> {
@@ -273,6 +273,11 @@ function registerIpc(): void {
   }))
   handle('updateSettings', async (patch: Partial<Settings>) => {
     if (!patch || typeof patch !== 'object' || 'provider' in patch) throw new Error('Use Connect to change your Drive account.')
+    if ('scanRoots' in patch || 'scanRoot' in patch) {
+      const roots = normalizeRoots(patch.scanRoots ?? patch.scanRoot!)
+      cancelLocalScan()
+      patch = { ...patch, scanRoots: roots, scanRoot: roots[0] }
+    }
     settings = { ...settings, ...patch }
     await saveSettings()
     // The capture harness must never touch the tray, login items, or update schedule on this machine.
@@ -448,9 +453,10 @@ function registerIpc(): void {
       if (!insideScanRoot(p)) throw new Error('Sentry only removes items inside the folder you scanned.')
     }
     for (const p of paths) if (existsSync(p)) await shell.trashItem(p)
-    await localScans.prune(settings.scanRoot, paths).catch(() => undefined)
+    await localScans.prune(selectedRoots(settings), paths).catch(() => undefined)
   })
-  handle('lastLocalScan', () => localScans.load(settings.scanRoot))
+  handle('localDrives', () => localDrives())
+  handle('lastLocalScan', () => localScans.load(selectedRoots(settings)))
   handle('forgetLocalScan', () => localScans.clear())
 
   handle('scanDrive', async () => {
@@ -458,8 +464,8 @@ function registerIpc(): void {
     const [files, quota] = await Promise.all([provider().allFiles(), provider().quota()])
     return driveMap(files, quota, started)
   })
-  handle('scanLocal', async (root?: string) => {
-    const target = root ?? settings.scanRoot
+  handle('scanLocal', async (root?: string | string[]) => {
+    const target = normalizeRoots(root ?? selectedRoots(settings))
     const snap = await scanLocal(target, (p) => send('scan-progress', p))
     // Remember it, so the next launch opens straight onto this map.
     await localScans.save(target, snap).catch(() => undefined)

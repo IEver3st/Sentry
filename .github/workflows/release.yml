@@ -50,10 +50,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun run test:notifications
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          bun run test:local
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test tests/release-config.test.mjs tests/release-assets.test.mjs
       - run: bun run build
       - run: bun run test:scan
       - run: bun run test:window
+      - run: bun run test:multi-drive
       - name: Package Windows x64 without publishing
         run: bun x --no-install electron-builder --config dist/release-builder.json --win nsis --x64 --publish never
       - name: Verify installer and embedded update feed

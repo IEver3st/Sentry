@@ -140,6 +140,10 @@ export async function scanMap(source: 'drive' | 'local'): Promise<void> {
   }))
   try {
     const snap = source === 'drive' ? await api().scanDrive() : await api().scanLocal()
+    if (source === 'local') {
+      const current = useApp.getState().settings
+      if (JSON.stringify(current?.scanRoots ?? current?.scanRoot) !== JSON.stringify(s.settings?.scanRoots ?? s.settings?.scanRoot)) return
+    }
     if (source === 'drive' && useApp.getState().settings?.provider !== s.settings?.provider) {
       // The account changed mid-scan: drop this result, but let the next scan run.
       useApp.setState({ driveScanAttemptVersion: -1 })
@@ -153,8 +157,8 @@ export async function scanMap(source: 'drive' | 'local'): Promise<void> {
     if (source === 'local' && useApp.getState().route !== 'map') {
       useApp.setState({ localScanUnseen: true })
       toast({
-        tone: 'success',
-        title: 'This PC is mapped',
+        tone: snap.scanErrors?.length ? 'info' : 'success',
+        title: snap.scanErrors?.length ? 'Scan finished with unavailable locations' : 'This PC is mapped',
         detail: `${formatSize(snap.root.size)} across ${snap.root.files.toLocaleString()} files.`,
         action: { label: 'Open', run: () => go('map') }
       })

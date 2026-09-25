@@ -59,6 +59,10 @@ function classify(name: string, parent: Dir | null, siblings: Set<string>): { ca
 }
 
 let cancelled = false
+const roots: string[] = workerData.roots ?? [workerData.root]
+let completedFiles = 0
+let completedBytes = 0
+let rootIndex = 0
 let progressEnabled = workerData.progressEnabled !== false
 let updateProgressTimer = (): void => {}
 let stopProgress = (): void => {}
@@ -79,7 +83,8 @@ async function scan(rootPath: string): Promise<Dir> {
   let bytes = 0
   let current = rootPath
   let ticker: ReturnType<typeof setInterval> | null = null
-  const report = (): void => { parentPort?.postMessage({ type: 'progress', files, bytes, current }) }
+  let rootError: unknown = null
+  const report = (): void => { parentPort?.postMessage({ type: 'progress', files: completedFiles + files, bytes: completedBytes + bytes, current, root: rootPath, rootIndex: rootIndex + 1, rootCount: roots.length }) }
   stopProgress = () => {
     if (ticker) clearInterval(ticker)
     ticker = null
@@ -121,7 +126,8 @@ async function scan(rootPath: string): Promise<Dir> {
           if (cancelled) break
           entries.push({ name: e.name, isDir: e.isDirectory(), isFile: e.isFile() })
         }
-      } catch {
+      } catch (error) {
+        if (dir === root) rootError = error
         return // permission denied, vanished, etc.
       }
       const names = new Set(entries.map((e) => e.name.toLowerCase()))
@@ -172,7 +178,8 @@ async function scan(rootPath: string): Promise<Dir> {
   })
 
   stopProgress()
-  if (progressEnabled) parentPort?.postMessage({ type: 'progress', files, bytes, current: rootPath })
+  if (rootError) throw rootError
+  if (progressEnabled) report()
   if (!cancelled) rollup(root)
   return root
 }
@@ -226,16 +233,38 @@ function toNode(dir: Dir, minSize: number): MapNode {
   return node
 }
 
-const { root } = workerData as { root: string }
-scan(root)
-  .then((tree) => {
-    if (cancelled) {
-      parentPort?.postMessage({ type: 'cancelled' })
-      return
+async function scanRoots(): Promise<void> {
+  const children: MapNode[] = []
+  const scanErrors: Array<{ root: string; message: string }> = []
+  for (rootIndex = 0; rootIndex < roots.length && !cancelled; rootIndex++) {
+    const root = roots[rootIndex]
+    try {
+      const tree = await scan(root)
+      if (cancelled) break
+      completedFiles += tree.files
+      completedBytes += tree.size
+      children.push(toNode(tree, Math.max(tree.size / 6000, 1024 * 1024)))
+    } catch (error) {
+      stopProgress()
+      scanErrors.push({ root, message: error instanceof Error ? error.message : String(error) })
     }
-    const minSize = Math.max(tree.size / 6000, 1024 * 1024)
-    parentPort?.postMessage({ type: 'done', root: toNode(tree, minSize) })
-  })
+  }
+  if (cancelled) {
+    parentPort?.postMessage({ type: 'cancelled' })
+    return
+  }
+  if (!children.length) throw new Error(scanErrors.map((e) => `${e.root}: ${e.message}`).join('\n') || 'No locations to scan.')
+  const root: MapNode = roots.length === 1 ? children[0] : {
+    id: 'local:computer', name: 'This PC', virtual: true, isDir: true, category: 'other',
+    size: completedBytes, files: completedFiles,
+    dirs: children.reduce((sum, child) => sum + child.dirs + 1, 0),
+    newest: Math.max(...children.map((child) => child.newest)),
+    children: children.sort((a, b) => b.size - a.size)
+  }
+  parentPort?.postMessage({ type: 'done', root, scanErrors })
+}
+
+scanRoots()
   .catch((error: unknown) => parentPort?.postMessage({ type: 'error', message: String(error) }))
   .finally(() => {
     stopProgress()

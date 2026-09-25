@@ -24,7 +24,7 @@ Sentry shows your files as a map: the bigger the tile, the more space it takes. 
 
 ## What you can do
 
-- **Find where the space went.** Explore local folders and Drive storage by size, file count, or age. Select a tile to inspect the file behind it.
+- **Find where the space went.** Scan several drives or folders into one local map, or explore your Google Drive storage. Browse by size, file count, or age, then select a tile to inspect the file behind it.
 - **Manage Drive files.** Search, rename, move, star, and trash files. Create folders and manage public sharing links.
 - **Move files between PC and Drive.** Drop files into Sentry to upload, download them to a folder you choose, and track or cancel transfers. Google Docs, Sheets, and Slides export to Office formats.
 - **Review local files.** Open items, reveal them in Explorer, or move selected items to the Recycle Bin after confirmation. Cache and build-output labels are suggestions to review, not automatic cleanup rules.
@@ -98,10 +98,12 @@ bun run typecheck
 bun run test:google
 bun run test:performance
 bun run test:notifications
+bun run test:local
 node --test tests/release-config.test.mjs tests/release-assets.test.mjs
 bun run build
 bun run test:scan
 bun run test:window
+bun run test:multi-drive
 bun run capture:background
 bun run capture
 bun run dist

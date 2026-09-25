@@ -4,6 +4,7 @@ import { parse } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { DriveFile, DriveQuota, MapNode, MapSnapshot, ScanProgress, Suggestion } from '@shared/types'
 import { categoryFromKind } from '@shared/kinds'
+import { normalizeRoots } from './local-roots'
 
 const DAY = 86_400_000
 const GiB = 1024 ** 3
@@ -11,8 +12,10 @@ const GiB = 1024 ** 3
 let activeWorker: Worker | null = null
 let cancelActiveScan: (() => void) | null = null
 let progressEnabled = true
+let scanGeneration = 0
 
 export function cancelLocalScan(): void {
+  scanGeneration++
   cancelActiveScan?.()
 }
 
@@ -21,11 +24,14 @@ export function setScanProgressEnabled(enabled: boolean): void {
   activeWorker?.postMessage({ type: 'progress-enabled', enabled })
 }
 
-export async function scanLocal(root: string, onProgress: (p: ScanProgress) => void): Promise<MapSnapshot> {
+export async function scanLocal(input: string | string[], onProgress: (p: ScanProgress) => void): Promise<MapSnapshot> {
+  const roots = normalizeRoots(input)
   cancelLocalScan()
+  const generation = scanGeneration
   const started = Date.now()
+  let scanErrors: MapSnapshot['scanErrors'] = []
   const tree = await new Promise<MapNode>((resolve, reject) => {
-    const worker = new Worker(fileURLToPath(new URL('./scan-worker.js', import.meta.url)), { workerData: { root, progressEnabled } })
+    const worker = new Worker(fileURLToPath(new URL('./scan-worker.js', import.meta.url)), { workerData: { roots, progressEnabled } })
     activeWorker = worker
     let settled = false
     const finish = (error: Error | null, tree?: MapNode): void => {
@@ -45,7 +51,10 @@ export async function scanLocal(root: string, onProgress: (p: ScanProgress) => v
     worker.on('message', (msg: { type: string } & Record<string, unknown>) => {
       if (settled) return
       if (msg.type === 'progress' && progressEnabled) onProgress(msg as unknown as ScanProgress)
-      else if (msg.type === 'done') finish(null, msg.root as MapNode)
+      else if (msg.type === 'done') {
+        scanErrors = msg.scanErrors as MapSnapshot['scanErrors'] ?? []
+        finish(null, msg.root as MapNode)
+      }
       else if (msg.type === 'cancelled') finish(new Error('Scan cancelled.'))
       else if (msg.type === 'error') finish(new Error(String(msg.message)))
     })
@@ -55,13 +64,19 @@ export async function scanLocal(root: string, onProgress: (p: ScanProgress) => v
     })
   })
 
-  let disk: MapSnapshot['disk'] = null
-  try {
-    const fs = await statfs(root)
-    disk = { label: parse(root).root.replace(/\\$/, '') || root, free: fs.bavail * fs.bsize, total: fs.blocks * fs.bsize }
-  } catch {
-    /* statfs unsupported */
+  const disks: NonNullable<MapSnapshot['disks']> = []
+  const volumes = new Map(roots.filter((root) => !scanErrors?.some((e) => e.root === root)).map((root) => {
+    const volume = parse(root).root
+    return [process.platform === 'win32' ? volume.toLowerCase() : volume, volume]
+  })).values()
+  for (const root of volumes) {
+    try {
+      const fs = await statfs(root)
+      disks.push({ root, label: root.replace(/\\$/, '') || root, free: fs.bavail * fs.bsize, total: fs.blocks * fs.bsize })
+    } catch { /* unavailable disk figures must not invalidate a completed scan */ }
   }
+  const disk = disks.length ? { label: disks.length === 1 ? disks[0].label : `${disks.length} drives`, free: disks.reduce((sum, d) => sum + d.free, 0), total: disks.reduce((sum, d) => sum + d.total, 0) } : null
+  if (generation !== scanGeneration) throw new Error('Scan cancelled.')
 
   return {
     source: 'local',
@@ -69,7 +84,9 @@ export async function scanLocal(root: string, onProgress: (p: ScanProgress) => v
     scannedAt: new Date().toISOString(),
     durationMs: Date.now() - started,
     suggestions: localSuggestions(tree),
-    disk
+    disk,
+    disks,
+    scanErrors
   }
 }
 
@@ -87,7 +104,7 @@ function localSuggestions(root: MapNode): Suggestion[] {
     }
     node.children?.forEach((c) => walk(c, depth + 1))
   }
-  walk(root, 0)
+  walk(root, root.virtual ? -1 : 0)
 
   const out: Suggestion[] = []
   // Group node_modules and friends so 400 tiny folders become one line.

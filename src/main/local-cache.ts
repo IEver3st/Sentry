@@ -1,14 +1,16 @@
 import { readFile, rename, rm, statfs, writeFile } from 'node:fs/promises'
-import { join, parse, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { MapNode, MapSnapshot } from '@shared/types'
+import { normalizeRoots, rootsKey } from './local-roots'
 
 /**
  * Remembers the last This PC scan across launches, so the map is there immediately and
- * a rescan is the user's choice. Tied to the folder it scanned; a different folder means no cache.
+ * a rescan is the user's choice. Tied to the selected roots, independent of their order.
  */
 interface Stored {
-  version: 1
-  root: string
+  version: 1 | 2
+  root?: string
+  roots?: string[]
   snapshot: MapSnapshot
 }
 
@@ -21,8 +23,8 @@ export class LocalScanCache {
     return join(this.dir, 'local-scan.json')
   }
 
-  save(root: string, snapshot: MapSnapshot): Promise<void> {
-    const data: Stored = { version: 1, root: resolve(root), snapshot }
+  save(root: string | string[], snapshot: MapSnapshot): Promise<void> {
+    const data: Stored = { version: 2, roots: normalizeRoots(root), snapshot }
     this.writing = this.writing
       .catch(() => undefined)
       .then(async () => {
@@ -33,8 +35,8 @@ export class LocalScanCache {
     return this.writing
   }
 
-  /** The saved scan for this folder, with free disk space refreshed (that changes between launches). */
-  async load(root: string): Promise<MapSnapshot | null> {
+  /** The saved scan for these roots, with available disk space refreshed. */
+  async load(root: string | string[]): Promise<MapSnapshot | null> {
     await this.writing.catch(() => undefined)
     let data: Stored
     try {
@@ -42,19 +44,32 @@ export class LocalScanCache {
     } catch {
       return null
     }
-    if (data.version !== 1 || data.root !== resolve(root)) return null
-    const snap = data.snapshot
     try {
-      const fs = await statfs(root)
-      snap.disk = { label: parse(root).root.replace(/\\$/, '') || root, free: fs.bavail * fs.bsize, total: fs.blocks * fs.bsize }
-    } catch {
-      /* keep the saved figures */
+      const saved = data.version === 1 ? data.root : data.version === 2 ? data.roots : undefined
+      if (!saved || rootsKey(saved) !== rootsKey(root)) return null
+    } catch { return null }
+    const snap = data.snapshot
+    if (snap.disks?.length) {
+      for (const disk of snap.disks) {
+        try {
+          const fs = await statfs(disk.root)
+          disk.free = fs.bavail * fs.bsize
+          disk.total = fs.blocks * fs.bsize
+        } catch { /* keep the saved figures for disconnected volumes */ }
+      }
+      snap.disk = { label: snap.disks.length === 1 ? snap.disks[0].label : `${snap.disks.length} drives`, free: snap.disks.reduce((sum, d) => sum + d.free, 0), total: snap.disks.reduce((sum, d) => sum + d.total, 0) }
+    } else if (snap.disk) {
+      try {
+        const fs = await statfs(normalizeRoots(root)[0])
+        snap.disk.free = fs.bavail * fs.bsize
+        snap.disk.total = fs.blocks * fs.bsize
+      } catch { /* keep the saved figures */ }
     }
     return snap
   }
 
   /** Keep the saved map truthful after items go to the Recycle Bin. */
-  async prune(root: string, paths: string[]): Promise<void> {
+  async prune(root: string | string[], paths: string[]): Promise<void> {
     const snap = await this.load(root)
     if (!snap) return
     const gone = new Set(paths.map((p) => resolve(p)))

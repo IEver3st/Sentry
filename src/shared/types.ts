@@ -93,6 +93,8 @@ export interface MapNode {
   isDir: boolean
   /** When smaller items were folded together for display. */
   aggregate?: boolean
+  /** A combined view, not a filesystem path. */
+  virtual?: boolean
   children?: MapNode[]
 }
 
@@ -112,12 +114,24 @@ export interface MapSnapshot {
   durationMs: number
   suggestions: Suggestion[]
   disk: { label: string; free: number; total: number } | null
+  disks?: Array<{ root: string; label: string; free: number; total: number }>
+  scanErrors?: Array<{ root: string; message: string }>
+}
+
+export interface LocalDrive {
+  root: string
+  label: string
+  total: number | null
+  free: number | null
 }
 
 export interface ScanProgress {
   files: number
   bytes: number
   current: string
+  root?: string
+  rootIndex?: number
+  rootCount?: number
 }
 
 /* ---------- Transfers ---------- */
@@ -151,6 +165,8 @@ export interface Settings {
   name: string
   downloadDir: string
   scanRoot: string
+  /** Selected drives/folders. Older profiles fall back to scanRoot. */
+  scanRoots?: string[]
   reduceMotion: boolean
   theme: Theme
   accent: Accent
@@ -284,15 +300,16 @@ export interface SentryApi {
   shellIntegration(): Promise<ShellIntegration>
   setShellIntegration(on: boolean): Promise<ShellIntegration>
 
-  /** This PC actions. Paths must sit inside the scanned folder. */
+  /** This PC actions. Paths must sit inside one of the selected scan roots. */
   openLocal(path: string): Promise<void>
   trashLocal(paths: string[]): Promise<void>
-  /** The last This PC scan of the current folder, remembered across launches. */
+  /** The last This PC scan of the selected locations, remembered across launches. */
   lastLocalScan(): Promise<MapSnapshot | null>
+  localDrives(): Promise<LocalDrive[]>
   forgetLocalScan(): Promise<void>
 
   scanDrive(): Promise<MapSnapshot>
-  scanLocal(root?: string): Promise<MapSnapshot>
+  scanLocal(root?: string | string[]): Promise<MapSnapshot>
   cancelScan(): Promise<void>
 
   on<K extends keyof SentryEvents>(event: K, listener: (payload: SentryEvents[K]) => void): () => void

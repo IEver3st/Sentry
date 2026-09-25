@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUpFromLine, ChevronRight, Clipboard, CloudUpload, Exter
 import type { MapNode, MapSnapshot } from '@shared/types'
 import { api, fail, go, pullFiles, quickLink, revealFile, scanMap, toast, uploadPaths, useApp } from '@/lib/store'
 import { pickDriveFolder } from '@/components/DrivePicker'
+import { LocalScanPicker } from '@/components/LocalScanPicker'
 import { confirm } from '@/components/Confirm'
 import { formatCount, formatSize, percent, plural, relativeTime } from '@/lib/format'
 import { useSize } from '@/lib/hooks'
@@ -33,6 +34,7 @@ export function MapPage() {
   const source = useApp((s) => s.mapSource)
   const snap = useApp((s) => s.maps[s.mapSource])
   const scanning = useApp((s) => s.scanning[s.mapSource])
+  const settings = useApp((s) => s.settings)
   const windowActive = useApp((s) => s.windowActive)
   const driveVersion = useApp((s) => s.driveVersion)
   const driveScanAttemptVersion = useApp((s) => s.driveScanAttemptVersion)
@@ -97,7 +99,7 @@ export function MapPage() {
   // Keyboard map, mirroring the hint bar at the bottom.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if ((e.target as HTMLElement).tagName === 'INPUT' || e.ctrlKey || e.metaKey || e.altKey) return
+      if (document.querySelector('[role="dialog"]') || (e.target as HTMLElement).tagName === 'INPUT' || e.ctrlKey || e.metaKey || e.altKey) return
       const k = e.key
       if (k === '/') {
         e.preventDefault()
@@ -154,6 +156,26 @@ export function MapPage() {
   return (
     <div className="flex h-full">
       <div className="flex min-w-0 flex-1 flex-col">
+        {source === 'local' && (
+          <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.05] px-5 py-2">
+            <LocalScanPicker />
+            {snap?.root.virtual && !scanning && (
+              <select aria-label="Map location" className="w-40 shrink-0 rounded-md border border-white/[0.08] bg-ink-800 px-2 py-1.5 text-[12px] outline-none focus-visible:ring-1 focus-visible:ring-sky"
+                value={trail[1]?.id ?? ''} onChange={(e) => { setFocusId(e.target.value || null); setSelectedId(null); setMarked(new Set()) }}>
+                <option value="">All locations</option>
+                {snap.root.children?.map((child) => <option key={child.id} value={child.id}>{child.id}</option>)}
+              </select>
+            )}
+            <span className="min-w-0 truncate text-[12px] text-fog-400" title={(settings?.scanRoots ?? [settings?.scanRoot ?? '']).join(', ')}>
+              {(settings?.scanRoots ?? [settings?.scanRoot ?? '']).join(', ')}
+            </span>
+          </div>
+        )}
+        {source === 'local' && Boolean(snap?.scanErrors?.length) && !scanning && (
+          <div role="status" className="max-h-28 shrink-0 overflow-y-auto break-words border-b border-white/[0.05] px-5 py-2 text-[12px] text-amber">
+            <p>Scan incomplete. Couldn’t read {snap!.scanErrors!.map((e) => e.root).join(', ')}. Reconnect or unlock these drives, then rescan.</p>
+          </div>
+        )}
         {/* Controls */}
         <div className="flex h-14 shrink-0 items-center gap-3 px-5">
           <nav className="flex min-w-0 flex-1 items-center gap-0.5 text-[13.5px]" aria-label="Zoom path">
@@ -378,11 +400,14 @@ function LocalMenu({
   onRemoved: (ids: string[]) => void
 }) {
   const connected = useApp((s) => Boolean(s.status?.connected))
+  const settings = useApp((s) => s.settings)
   // Act on every marked item when the right-clicked one is part of the marked set.
   const group = marked.length > 1 && marked.some((m) => m.id === node.id) ? marked : [node]
   const many = group.length > 1
-  const real = group.filter((n) => !n.aggregate)
+  const real = group.filter((n) => !n.aggregate && !n.virtual)
   const paths = real.map((n) => n.id)
+  const protectedRoots = settings?.scanRoots ?? [settings?.scanRoot ?? '']
+  const includesRoot = paths.some((path) => protectedRoots.some((root) => root.toLowerCase() === path.toLowerCase()))
   const total = real.reduce((a, n) => a + n.size, 0)
   const isMarked = marked.some((m) => m.id === node.id)
 
@@ -414,7 +439,7 @@ function LocalMenu({
     }
   }
 
-  if (node.aggregate) {
+  if (node.aggregate || node.virtual) {
     return (
       <ContextMenu.Portal>
         <ContextMenu.Content className={MENU}>
@@ -472,7 +497,7 @@ function LocalMenu({
             <Sep />
           </>
         )}
-        <Item icon={<Trash2 size={15} />} danger onSelect={recycle} disabled={isFocus && !many}>
+        <Item icon={<Trash2 size={15} />} danger onSelect={recycle} disabled={includesRoot || (isFocus && !many)}>
           {many ? `Move ${real.length} to Recycle Bin…` : 'Move to Recycle Bin…'}
         </Item>
       </ContextMenu.Content>
@@ -572,6 +597,9 @@ function ScanState({ source }: { source: 'drive' | 'local' }) {
           <div className="flex items-center justify-center gap-2.5 text-[15px] font-semibold">
             <Spinner /> {source === 'drive' ? 'Mapping your Drive' : 'Scanning this PC'}
           </div>
+          {source === 'local' && progress?.rootCount && progress.rootCount > 1 && (
+            <p className="mt-2 text-[13px] text-fog-300">Location {progress.rootIndex} of {progress.rootCount} · {progress.root}</p>
+          )}
           {source === 'local' && progress && progress.files > 0 && (
             <>
               <p className="mt-2 text-[22px] font-semibold tnum">
@@ -602,21 +630,19 @@ function ScanState({ source }: { source: 'drive' | 'local' }) {
 }
 
 function StartLocal() {
-  const root = useApp((s) => s.settings?.scanRoot)
+  const settings = useApp((s) => s.settings)
+  const roots = settings?.scanRoots ?? [settings?.scanRoot ?? '']
   return (
     <div className="absolute inset-0 grid place-items-center">
       <div className="max-w-md text-center">
         <HardDrive size={40} strokeWidth={1.4} className="mx-auto text-mint" />
         <p className="mt-4 text-[20px] font-semibold">See what’s eating this PC</p>
         <p className="mt-2 text-[14px] text-fog-400">
-          Sentry will read file sizes under <span className="text-fog-100" data-selectable>{root}</span>. Nothing leaves your computer.
+          Sentry will read file sizes across <span className="text-fog-100" data-selectable>{roots.length === 1 ? roots[0] : `${roots.length} selected locations`}</span>. Nothing leaves your computer.
         </p>
         <div className="mt-6 flex justify-center gap-2">
           <Button variant="primary" onClick={() => scanMap('local')}>
             Scan now
-          </Button>
-          <Button variant="ghost" onClick={() => go('settings')}>
-            Pick another folder
           </Button>
         </div>
       </div>
@@ -644,6 +670,9 @@ function MapPanel({
   onSuggestion: (id: string) => void
 }) {
   const total = snap?.root.size ?? 0
+  const disk = source === 'local' && node && !node.virtual
+    ? snap?.disks?.find((d) => node.id.toLowerCase().startsWith(d.root.toLowerCase())) ?? snap?.disk
+    : snap?.disk
   const connected = useApp((s) => Boolean(s.status?.connected))
   const markedNodes = [...marked].map((id) => index?.byId.get(id)).filter(Boolean) as MapNode[]
   const markedSize = markedNodes.reduce((a, n) => a + n.size, 0)
@@ -661,7 +690,7 @@ function MapPanel({
                 {node.name}
               </span>
             </p>
-            {source === 'local' && <p className="mt-1 truncate font-mono text-[11px] text-fog-500" data-selectable title={node.id}>{node.id}</p>}
+            {source === 'local' && !node.virtual && <p className="mt-1 truncate font-mono text-[11px] text-fog-500" data-selectable title={node.id}>{node.id}</p>}
             <BigSize bytes={node.size} className="mt-4 block text-[54px] leading-none" unitClass="text-[0.38em]" />
             <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/6">
               <motion.div className="h-full rounded-full bg-amber" initial={{ width: 0 }} animate={{ width: `${percent(node.size, total)}%` }} transition={{ type: 'spring', stiffness: 160, damping: 26 }} />
@@ -672,7 +701,7 @@ function MapPanel({
               <PanelStat label="Last change" value={node.newest ? relativeTime(node.newest) : '—'} />
               <PanelStat label="Kind" value={node.reclaimable ? 'Clearable' : nodeGroup(node).label} />
             </dl>
-            {!node.aggregate && node.id !== 'root' && (
+            {!node.aggregate && !node.virtual && node.id !== 'root' && (
               <div className="mt-5 flex flex-wrap gap-2">
                 {source === 'drive' ? (
                   <>
@@ -779,19 +808,19 @@ function MapPanel({
         </ul>
       </div>
 
-      {snap?.disk && (
+      {disk && (
         <div className="mt-auto border-t border-white/[0.05] pt-5">
-          <SectionLabel right={<span className="truncate text-[11.5px] text-fog-500">{snap.disk.label}</span>}>{source === 'drive' ? 'Plan' : 'Disk'}</SectionLabel>
+          <SectionLabel right={<span className="truncate text-[11.5px] text-fog-500">{disk.label}</span>}>{source === 'drive' ? 'Plan' : 'Disk'}</SectionLabel>
           <p>
-            <BigSize bytes={snap.disk.free} className="text-[34px] leading-none" unitClass="text-[0.45em]" />
+            <BigSize bytes={disk.free} className="text-[34px] leading-none" unitClass="text-[0.45em]" />
             <span className="ml-2 text-[13px] text-fog-400">free</span>
           </p>
           <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/6">
-            <div className="h-full rounded-full bg-fog-500" style={{ width: `${percent(snap.disk.total - snap.disk.free, snap.disk.total)}%` }} />
+            <div className="h-full rounded-full bg-fog-500" style={{ width: `${percent(disk.total - disk.free, disk.total)}%` }} />
           </div>
           <p className="mt-2 flex justify-between text-[12px] text-fog-500 tnum">
-            <span>{formatSize(snap.disk.total - snap.disk.free)} used</span>
-            <span>{formatSize(snap.disk.total)} total</span>
+            <span>{formatSize(disk.total - disk.free)} used</span>
+            <span>{formatSize(disk.total)} total</span>
           </p>
         </div>
       )}

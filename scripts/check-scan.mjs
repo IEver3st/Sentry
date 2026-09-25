@@ -66,6 +66,43 @@ async function checkWorker(mode) {
   } finally { await worker.terminate() }
 }
 
+async function checkMultipleRoots() {
+  const roots = Array.from({ length: 4 }, (_, d) => join(root, `folder-${d}`))
+  const missing = join(root, 'unavailable-drive')
+  async function run(roots, cancel = false) {
+    const worker = new Worker(current, { workerData: { roots }, execArgv: [] })
+    const messages = []
+    try {
+      await new Promise((accept, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Multi-location scan timed out')), 10_000)
+        worker.on('message', (message) => {
+          messages.push(message)
+          if (cancel && message.type === 'progress') worker.postMessage({ type: 'cancel' })
+        })
+        worker.once('error', reject)
+        worker.once('exit', () => { clearTimeout(timeout); accept() })
+      })
+      return messages
+    } finally { await worker.terminate() }
+  }
+  const messages = await run([...roots, missing])
+  const done = messages.at(-1)
+  assert.equal(done.type, 'done')
+  assert.equal(done.root.virtual, true)
+  assert.equal(done.root.children.length, 4)
+  assert.equal(done.root.files, 400)
+  assert.equal(done.root.size, 400 * Buffer.byteLength('scan fixture'))
+  assert.equal(done.scanErrors[0].root, missing)
+  const progress = messages.filter((m) => m.type === 'progress')
+  for (let i = 1; i < progress.length; i++) {
+    assert.ok(progress[i].files >= progress[i - 1].files, 'Progress must not reset between drives')
+    assert.ok(progress[i].bytes >= progress[i - 1].bytes)
+  }
+  assert.equal((await run([missing])).at(-1).type, 'error', 'Missing roots must not become successful empty scans')
+  assert.equal((await run(roots, true)).at(-1).type, 'cancelled')
+  console.log('PASS: four locations, cumulative progress, unavailable drive, all-failed scan, cancellation.')
+}
+
 try {
   for (let d = 0; d < 4; d++) {
     const folder = join(root, `folder-${d}`)
@@ -78,5 +115,6 @@ try {
   await repeatedScans(current, 'current')
   await checkWorker('hidden')
   await checkWorker('cancelled')
+  await checkMultipleRoots()
   console.log(JSON.stringify({ repeatedScans: results, hiddenScan: 'passed without progress events', cancelledScan: 'passed with natural worker exit' }, null, 2))
 } finally { await rm(root, { recursive: true, force: true }) }

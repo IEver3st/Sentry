@@ -1,7 +1,7 @@
 {
   "name": "sentry",
   "productName": "Sentry",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "A friendly desktop home for your Google Drive storage.",
   "main": "out/main/index.js",
@@ -14,6 +14,8 @@
     "test:google": "bun test tests/google.test.ts",
     "test:performance": "bun test tests/performance.test.ts && bun test tests/updater.test.ts",
     "test:notifications": "bun test tests/notifications.test.ts",
+    "test:local": "bun test tests/local-scan.test.ts",
+    "test:multi-drive": "electron scripts/check-multi-drive.mjs",
     "test:scan": "node scripts/check-scan.mjs",
     "test:window": "electron scripts/check-window-lifecycle.mjs",
     "capture": "electron-vite build && electron . --capture",

@@ -26,6 +26,7 @@ import { formatSize } from '@/lib/format'
 import { Button, cx, Kbd, Logo, Segmented } from '@/components/ui'
 import { StorageStrip } from '@/components/Sidebar'
 import { GoogleClientImport } from '@/components/GoogleClientImport'
+import { LocalScanPicker } from '@/components/LocalScanPicker'
 import { confirm } from '@/components/Confirm'
 
 type SectionId = 'general' | 'appearance' | 'background' | 'drive' | 'transfers' | 'pc' | 'updates' | 'shortcuts' | 'about'
@@ -255,11 +256,10 @@ function useSettingsRows(settings: Settings, status: NonNullable<ReturnType<type
     finally { setConnectingGoogle(false) }
   }
 
-  const pick = async (key: 'downloadDir' | 'scanRoot'): Promise<void> => {
+  const pick = async (key: 'downloadDir'): Promise<void> => {
     const dir = await api().pickDirectory(settings[key])
     if (!dir) return
     await save({ [key]: dir })
-    if (key === 'scanRoot') useApp.setState((s) => ({ maps: { ...s.maps, local: null } }))
   }
 
   const disconnect = async (): Promise<void> => {
@@ -616,19 +616,10 @@ function useSettingsRows(settings: Settings, status: NonNullable<ReturnType<type
       /* This PC */
       {
         section: 'pc',
-        title: 'Folder to map',
-        description: settings.scanRoot,
-        keywords: 'scan storage map disk',
-        control: (
-          <div className="flex gap-2">
-            <Button size="sm" variant="ghost" onClick={() => api().revealLocal(settings.scanRoot)}>
-              Open
-            </Button>
-            <Button size="sm" onClick={() => pick('scanRoot')}>
-              Change
-            </Button>
-          </div>
-        )
+        title: 'Drives & folders to map',
+        description: (settings.scanRoots ?? [settings.scanRoot]).join(', '),
+        keywords: 'scan storage map disk ssd locations',
+        control: <LocalScanPicker scanOnSave={false} />
       },
       {
         section: 'pc',
