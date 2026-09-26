@@ -20,6 +20,7 @@ import { containsPath, normalizeRoots, selectedRoots } from './local-roots'
 import { localDrives } from './local-drives'
 import { Updater } from './updater'
 import { installShellIntegration, removeShellIntegration, shellStatus, uploadPathsFrom } from './shell-integration'
+import { moveSelection, trashSelection } from './drive-mutations'
 import iconIco from '../../resources/icon.ico?asset'
 import iconPng from '../../resources/icon.png?asset'
 
@@ -366,26 +367,10 @@ function registerIpc(): void {
     send('drive-changed', { folderIds: [file.parentId] })
     return file
   })
-  handle('trash', async (ids: string[]) => {
-    const parents = new Set<string | null>()
-    for (const id of ids) {
-      const f = await provider().get(id)
-      parents.add(f.parentId)
-      await provider().trash(id)
-    }
-    send('drive-changed', { folderIds: [...parents] })
-  })
-  handle('move', async (ids: string[], parentId: string | null) => {
-    const parents = new Set<string | null>([parentId])
-    for (const id of ids) {
-      if (id === parentId) continue
-      const f = await provider().get(id)
-      if (f.parentId === parentId) continue
-      parents.add(f.parentId)
-      await provider().move(id, parentId)
-    }
-    send('drive-changed', { folderIds: [...parents] })
-  })
+  handle('trash', (ids: string[]) => trashSelection(ids, provider(), (folderIds) => send('drive-changed', { folderIds })))
+  handle('move', (ids: string[], parentId: string | null) =>
+    moveSelection(ids, parentId, provider(), (folderIds) => send('drive-changed', { folderIds }))
+  )
   handle('toggleStar', async (id: string) => {
     const f = await provider().get(id)
     const next = await provider().setStarred(id, !f.starred)
